@@ -1,0 +1,7 @@
+name = "memorial-proxy"
+main = "worker.js"
+compatibility_date = "2026-05-14"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "kling-images"

@@ -1,0 +1,76 @@
+# ============================================================
+# Memorial AI — git ignore rules
+# ============================================================
+
+# === User / sensitive runtime data ===
+# All member data, backups, and generated media — never commit.
+data/
+*.bak
+*.bak-*
+
+# Local credentials / tokens
+.env
+.env.*
+*.pem
+*.key
+*-credentials.json
+.cloudflared/
+
+# === Generated media (large binaries) ===
+# Test outputs that lived at the repo root during development.
+*.mp4
+*.webm
+*.mov
+*.m4a
+*.mp3
+*.wav
+clip1-*.mp4
+clip2-*.mp4
+memorial-*.mp4
+memorial-*.webm
+
+# Backup zips
+*.zip
+*.tar
+*.tar.gz
+
+# === Server logs / temp ===
+*.log
+/tmp/
+.tmp/
+.cache/
+logs/
+*.pid
+
+# === Node ===
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# === Wrangler (Cloudflare Workers) ===
+.wrangler/
+
+# === IDE / OS ===
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/
+
+# === Test artifacts ===
+/test-output/
+coverage/
+
+# === Local-only docs (working files, optional) ===
+HANDOFF-to-claude-code.md
+SETUP-A안.md
+
+# === Misc ===
+concat.txt
+concat-seq.txt
