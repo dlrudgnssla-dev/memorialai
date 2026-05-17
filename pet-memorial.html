@@ -12267,26 +12267,51 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
     endUrlS   = endImg || null;
   }
 
-  // generate_audio defaults to TRUE in Seedance 2.0 — we don't want it
-  // (BGM is added later by the compose step) and audio TTS has stricter
-  // content moderation that can trip the E005 sensitivity filter on
-  // otherwise-innocent inputs.
+  // MODE SELECTION:
+  // 'frame'     — image + last_frame_image (schema's dedicated keyframe fields)
+  //               PROBLEM: Seedance 2.0 treats last_frame_image as a SOFT
+  //               hint regardless of payload format (data URI vs URL).
+  //               Schema has no cfg_scale/guidance/strength knob to fix this.
+  // 'reference' — reference_images: [start, end] with [Image1]/[Image2]
+  //               tags in the prompt. Schema explicitly supports this pattern
+  //               and says these are mutually exclusive with first/last frame.
+  //               Different model code path → may honor end frame strictly.
+  //
+  // Admin can override via aiKeys.seedance.mode = 'frame' | 'reference'.
+  // Default = 'reference' as of this commit; we'll fall back to 'frame' if
+  // reference mode somehow worsens identity.
+  const seedanceMode = (aiKeys.seedance?.mode || 'reference').trim();
+
   const buildInput = (seed) => {
     const inp = {
-      [startField]: startUrlS,
       prompt: prompt || '',
       duration: dInt,
       aspect_ratio: '1:1',
       resolution,
       generate_audio: false
     };
-    if (endUrlS) inp[endField] = endUrlS;
     if (Number.isFinite(seed)) inp.seed = seed;
+
+    if (seedanceMode === 'reference' && endUrlS){
+      // REFERENCE MODE: send both images as references. Prompt prefix tells
+      // the model to use [Image1] as the start and [Image2] as the end.
+      // We DON'T set `image` or `last_frame_image` (mutually exclusive).
+      inp.reference_images = [startUrlS, endUrlS];
+      // Override prompt with explicit Image1→Image2 directive. Original
+      // motion description preserved.
+      const rawMotion = (prompt || '').replace(/^Natural smooth transition.*?\.\s*\(/, '').replace(/\)\s*$/, '').trim();
+      inp.prompt = `Camera follows a smooth natural transition: the subject starts in the exact pose, framing, and composition of [Image1], then moves to and ends in the exact pose, framing, and composition of [Image2]. ${rawMotion ? '(' + rawMotion + ')' : ''}`;
+    } else {
+      // FRAME MODE: use the schema's first/last frame fields directly.
+      inp[startField] = startUrlS;
+      if (endUrlS) inp[endField] = endUrlS;
+    }
     return inp;
   };
 
   let input = buildInput();
-  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s startField=${startField} endField=${endField} endSet=${endUrlS ? 'yes(url)' : 'no'} audio=off`);
+  const modeTag = seedanceMode === 'reference' ? 'mode=reference(image1/2)' : `mode=frame ${startField}/${endField}`;
+  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s ${modeTag} endSet=${endUrlS ? 'yes(url)' : 'no'} audio=off`);
   // Route through our server's CORS-safe proxy — browsers can't call
   // api.replicate.com directly. The proxy forwards the Authorization
   // header as-is and never persists the token.
