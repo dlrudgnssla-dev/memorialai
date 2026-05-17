@@ -12170,14 +12170,23 @@ async function callSeedanceClip(startImg, endImg, prompt, duration){
   // Route through our server's CORS-safe proxy — browsers can't call
   // api.replicate.com directly. The proxy forwards the Authorization
   // header as-is and never persists the token.
-  const createResp = await fetch('/replicate-proxy/predictions', {
+  //
+  // Replicate has TWO prediction endpoints:
+  //   * /v1/predictions                              — community models (needs `version` hash)
+  //   * /v1/models/{owner}/{name}/predictions        — OFFICIAL models like bytedance/seedance-2.0
+  //                                                    (no `version`, no `model` in body — just `input`)
+  // Seedance 2.0 is an official model, so we use the models/* route.
+  // The model string is "owner/name" (e.g. "bytedance/seedance-2.0").
+  // If the admin pasted a bare model name without a slash, default the owner to "bytedance".
+  const modelPath = /\//.test(model) ? model : `bytedance/${model}`;
+  const createResp = await fetch(`/replicate-proxy/models/${modelPath}/predictions`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
       'Prefer': 'wait'
     },
-    body: JSON.stringify({ model, input })
+    body: JSON.stringify({ input })
   });
 
   if (!createResp.ok) {

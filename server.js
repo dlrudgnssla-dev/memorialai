@@ -522,6 +522,7 @@ app.get('/health', (_req, res) => {
 // to Replicate using the client-supplied Authorization header (the
 // admin's r8_... token). We never read or persist that token here.
 // ============================================================
+// Generic predictions endpoint (community models — uses `version`)
 app.post('/replicate-proxy/predictions', express.json({ limit: '50mb' }), async (req, res) => {
   const auth = req.headers.authorization;
   if (!auth || !/^Bearer\s+r8_/i.test(auth)) {
@@ -546,6 +547,41 @@ app.post('/replicate-proxy/predictions', express.json({ limit: '50mb' }), async 
     res.status(502).json({ error: 'upstream fetch failed: ' + e.message });
   }
 });
+
+// Official models endpoint — used for Seedance 2.0, Flux, etc.
+// POST /replicate-proxy/models/{owner}/{name}/predictions
+// Forwards to https://api.replicate.com/v1/models/{owner}/{name}/predictions
+app.post('/replicate-proxy/models/:owner/:name/predictions',
+  express.json({ limit: '50mb' }),
+  async (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !/^Bearer\s+r8_/i.test(auth)) {
+      return res.status(400).json({ error: 'Authorization header (Bearer r8_...) missing or invalid' });
+    }
+    const { owner, name } = req.params;
+    if (!/^[A-Za-z0-9._-]+$/.test(owner) || !/^[A-Za-z0-9._-]+$/.test(name)) {
+      return res.status(400).json({ error: 'bad owner/name' });
+    }
+    try {
+      const upstream = `https://api.replicate.com/v1/models/${owner}/${name}/predictions`;
+      const r = await fetch(upstream, {
+        method: 'POST',
+        headers: {
+          'Authorization': auth,
+          'Content-Type': 'application/json',
+          'Prefer': req.headers['prefer'] || 'wait'
+        },
+        body: JSON.stringify(req.body || {})
+      });
+      const text = await r.text();
+      res.status(r.status)
+         .set('Content-Type', r.headers.get('content-type') || 'application/json')
+         .send(text);
+    } catch (e) {
+      console.error('[replicate-proxy model POST] error:', e.message);
+      res.status(502).json({ error: 'upstream fetch failed: ' + e.message });
+    }
+  });
 
 app.get('/replicate-proxy/predictions/:id', async (req, res) => {
   const auth = req.headers.authorization;
