@@ -12156,18 +12156,22 @@ async function callSeedanceClip(startImg, endImg, prompt, duration){
 
   // Build the input payload — Seedance 2.0 accepts `resolution`
   // ('480p' / '720p'), older 1.x variants ignore it.
+  // Replicate's bytedance/seedance-2.0 schema (verified via model README on
+  // replicate.com): the END frame field is `last_image` — NOT `last_frame`,
+  // `end_image`, or `last_frame_url` (those are fal.ai / wavespeed / BytePlus
+  // alternates). Other platforms use different names so this is a known footgun.
+  // If the field is omitted, Seedance generates motion freely from the start
+  // image; passing it makes the model interpolate toward the target frame.
   const input = {
     image: startImg,
     prompt: prompt || '',
     duration: dInt,
     aspect_ratio: '1:1',
-    resolution,
-    // last_frame supported by some Seedance variants — harmless to
-    // include; the API ignores unknown fields.
-    last_frame: endImg
+    resolution
   };
+  if (endImg) input.last_image = endImg;
 
-  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s`);
+  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s last_image=${endImg ? 'set' : 'none'}`);
   // Route through our server's CORS-safe proxy — browsers can't call
   // api.replicate.com directly. The proxy forwards the Authorization
   // header as-is and never persists the token.
