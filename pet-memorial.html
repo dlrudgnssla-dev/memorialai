@@ -12162,12 +12162,11 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
     prompt = rawPrompt;
   }
 
-  // Seedance's `last_frame_image` adherence is much better at SHORT durations.
-  // Long clips give the model too much room to wander away from the target.
-  // Cap at 5s when an end frame is supplied. User's clip duration setting
-  // still flows through for clips without an end frame.
-  const userDur = parseInt(duration) || 5;
-  const dInt = endImg ? Math.min(userDur, 5) : userDur;
+  // Respect the user's clip duration setting as-is. (Earlier we capped to 5s
+  // because Seedance adheres to last_frame_image better at short lengths, but
+  // the user prefers honoring their UI setting; prompt-side anchors below
+  // handle the end-frame guidance instead.)
+  const dInt = parseInt(duration) || 5;
 
   // Discover the EXACT schema field names. Cache on window per model.
   // (Cache key intentionally includes a version suffix so changes here
