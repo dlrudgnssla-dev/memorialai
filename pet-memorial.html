@@ -12146,27 +12146,14 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
   const resolution = (aiKeys.seedance?.resolution || '480p').trim();
   if (!token) throw new Error('Replicate API Token이 설정되지 않았습니다');
 
-  // PROMPT ENGINEERING for Seedance 2.0:
-  // Same root cause as the earlier Kling end-frame issue. For Kling we solved
-  // it with `cfg_scale: 0.2` (low scale = prompt weight ↓, image-anchor weight ↑).
-  // Seedance 2.0's Replicate schema has NO equivalent knob (no cfg_scale /
-  // guidance_scale / strength) so we can't tune the same way.
-  //
-  // Workaround: shorten/soften the prompt so it doesn't dominate the
-  // visual anchors. A long, directive motion prompt makes the model commit
-  // to its text plan and ignore last_frame_image. A short, generic
-  // transition hint lets the start/end images drive the result.
-  const rawPrompt = (prompt || '').trim().replace(/[.,\s]+$/, '');
-  if (endImg){
-    // Frame-to-frame mode (start image + end image):
-    // Use a minimal transition directive. We DO keep the original motion
-    // description, but trimmed and demoted to a parenthetical so the model
-    // weights it less heavily than the keyframe interpolation request.
-    const shortMotion = rawPrompt.length > 80 ? rawPrompt.slice(0, 80) + '…' : rawPrompt;
-    prompt = `Natural smooth transition from the first frame image to the last frame image. (${shortMotion})`;
-  } else {
-    prompt = rawPrompt;
-  }
+  // PROMPT ENGINEERING for Seedance 2.0 FLF mode:
+  // In strict first-last-frame mode the model is BOUNDARY-CONDITIONED by
+  // the two image anchors and infers motion between them. The text prompt
+  // is supplementary — describing the motion flavor, not the destination.
+  // Heavy directive prompts pull the model into regular i2v mode where
+  // last_frame_image becomes a soft hint again. Keep the prompt to the
+  // raw user-supplied motion description only (no anchor sentences).
+  prompt = (prompt || '').trim().replace(/[.,\s]+$/, '');
 
   // Respect the user's clip duration setting as-is. (Earlier we capped to 5s
   // because Seedance adheres to last_frame_image better at short lengths, but
@@ -12269,40 +12256,41 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
 
   // MODE SELECTION:
   // 'frame'     — image + last_frame_image (schema's dedicated keyframe fields)
-  //               PROBLEM: Seedance 2.0 treats last_frame_image as a SOFT
-  //               hint regardless of payload format (data URI vs URL).
-  //               Schema has no cfg_scale/guidance/strength knob to fix this.
-  // 'reference' — reference_images: [start, end] with [Image1]/[Image2]
-  //               tags in the prompt. Schema explicitly supports this pattern
-  //               and says these are mutually exclusive with first/last frame.
-  //               Different model code path → may honor end frame strictly.
+  // 'reference' — reference_images: [start, end] with [Image1]/[Image2] tags
   //
-  // Admin can override via aiKeys.seedance.mode = 'frame' | 'reference'.
-  // Default = 'reference' as of this commit; we'll fall back to 'frame' if
-  // reference mode somehow worsens identity.
-  const seedanceMode = (aiKeys.seedance?.mode || 'reference').trim();
+  // CRITICAL FLF TRIGGER (from BytePlus official docs):
+  //   "In first_last_frames mode, aspect ratio follows the reference image."
+  // ⇒ aspect_ratio MUST be 'adaptive' for the model to enter strict FLF mode.
+  //   Sending '1:1' (our previous default) forces the regular i2v code path
+  //   where last_frame_image is only a soft hint — this is the real cause of
+  //   the user's "end frame ignored" symptom.
+  const seedanceMode = (aiKeys.seedance?.mode || 'frame').trim();
 
   const buildInput = (seed) => {
     const inp = {
       prompt: prompt || '',
       duration: dInt,
-      aspect_ratio: '1:1',
+      // 'adaptive' lets the model infer aspect ratio from the input images.
+      // In frame mode this also TRIGGERS the strict first-last-frame code
+      // path (per BytePlus docs). In reference mode it just lets the model
+      // pick the best ratio.
+      aspect_ratio: 'adaptive',
       resolution,
       generate_audio: false
     };
     if (Number.isFinite(seed)) inp.seed = seed;
 
     if (seedanceMode === 'reference' && endUrlS){
-      // REFERENCE MODE: send both images as references. Prompt prefix tells
-      // the model to use [Image1] as the start and [Image2] as the end.
-      // We DON'T set `image` or `last_frame_image` (mutually exclusive).
+      // REFERENCE MODE: send both images as references with @Image1/@Image2
+      // tags (Seedance uses @ prefix, not [Image1] brackets — per recent
+      // ByteDance docs/blog post).
       inp.reference_images = [startUrlS, endUrlS];
-      // Override prompt with explicit Image1→Image2 directive. Original
-      // motion description preserved.
       const rawMotion = (prompt || '').replace(/^Natural smooth transition.*?\.\s*\(/, '').replace(/\)\s*$/, '').trim();
-      inp.prompt = `Camera follows a smooth natural transition: the subject starts in the exact pose, framing, and composition of [Image1], then moves to and ends in the exact pose, framing, and composition of [Image2]. ${rawMotion ? '(' + rawMotion + ')' : ''}`;
+      inp.prompt = `Camera follows a smooth natural transition: starts in the exact pose of @Image1, ends in the exact pose of @Image2. ${rawMotion ? '(' + rawMotion + ')' : ''}`;
     } else {
-      // FRAME MODE: use the schema's first/last frame fields directly.
+      // FRAME MODE — relies on `aspect_ratio: adaptive` to trigger strict
+      // FLF path. Keep the prompt minimal so the model isn't pulled toward
+      // a text-driven generation.
       inp[startField] = startUrlS;
       if (endUrlS) inp[endField] = endUrlS;
     }
@@ -12310,8 +12298,8 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
   };
 
   let input = buildInput();
-  const modeTag = seedanceMode === 'reference' ? 'mode=reference(image1/2)' : `mode=frame ${startField}/${endField}`;
-  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s ${modeTag} endSet=${endUrlS ? 'yes(url)' : 'no'} audio=off`);
+  const modeTag = seedanceMode === 'reference' ? 'mode=reference(@Image1/2)' : `mode=frame(FLF adaptive) ${startField}/${endField}`;
+  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s aspect=adaptive ${modeTag} endSet=${endUrlS ? 'yes(url)' : 'no'} audio=off`);
   // Route through our server's CORS-safe proxy — browsers can't call
   // api.replicate.com directly. The proxy forwards the Authorization
   // header as-is and never persists the token.
