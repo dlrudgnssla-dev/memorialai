@@ -12160,8 +12160,16 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
   const _schemaCacheKey = `_seedanceSchema_${model}_v3`;
   if (!window[_schemaCacheKey]){
     try {
-      const sr = await fetch(`/replicate-proxy/models/${model}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      // Bust browser/CDN cache — we hit this once per page load anyway,
+      // and a stale 404 from a prior server-zombie state was being reused.
+      const sr = await fetch(`/replicate-proxy/models/${model}?_=${Date.now()}`, {
+        method: 'GET',
+        cache: 'no-store',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Cache-Control': 'no-cache, no-store, max-age=0',
+          'Pragma': 'no-cache'
+        }
       });
       if (sr.ok){
         const meta = await sr.json();
