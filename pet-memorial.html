@@ -12195,26 +12195,37 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
   window._seedanceSchema = window[_schemaCacheKey];
 
   // Pick the END-frame field name from the schema instead of hardcoding.
-  // Order = preferred → fallback. Replicate sometimes renames between
-  // versions and we want to be robust.
-  const endFieldCandidates = ['last_image', 'last_frame_image', 'end_image', 'last_frame', 'image_last', 'tail_image'];
+  // Replicate's bytedance/seedance-2.0 uses `last_frame_image` (verified via
+  // schema fetch). Other Replicate models / variants may rename it — the
+  // candidate list lets us survive that without code changes.
+  const endFieldCandidates = ['last_frame_image', 'last_image', 'end_image', 'last_frame', 'image_last', 'tail_image'];
   const schemaFields = window._seedanceSchema?.fields || [];
-  const endField = endFieldCandidates.find(f => schemaFields.includes(f)) || 'last_image';
+  const endField = endFieldCandidates.find(f => schemaFields.includes(f)) || 'last_frame_image';
 
   // Similarly resolve START-frame field name (typically `image` but verify).
   const startFieldCandidates = ['image', 'first_image', 'start_image', 'image_url', 'init_image'];
   const startField = startFieldCandidates.find(f => schemaFields.includes(f)) || 'image';
 
-  const input = {
-    [startField]: startImg,
-    prompt: prompt || '',
-    duration: dInt,
-    aspect_ratio: '1:1',
-    resolution
+  // generate_audio defaults to TRUE in Seedance 2.0 — we don't want it
+  // (BGM is added later by the compose step) and audio TTS has stricter
+  // content moderation that can trip the E005 sensitivity filter on
+  // otherwise-innocent inputs.
+  const buildInput = (seed) => {
+    const inp = {
+      [startField]: startImg,
+      prompt: prompt || '',
+      duration: dInt,
+      aspect_ratio: '1:1',
+      resolution,
+      generate_audio: false
+    };
+    if (endImg) inp[endField] = endImg;
+    if (Number.isFinite(seed)) inp.seed = seed;
+    return inp;
   };
-  if (endImg) input[endField] = endImg;
 
-  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s startField=${startField} endField=${endField} endSet=${endImg ? 'yes' : 'no'}`);
+  let input = buildInput();
+  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s startField=${startField} endField=${endField} endSet=${endImg ? 'yes' : 'no'} audio=off`);
   // Route through our server's CORS-safe proxy — browsers can't call
   // api.replicate.com directly. The proxy forwards the Authorization
   // header as-is and never persists the token.
@@ -12227,40 +12238,61 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
   // The model string is "owner/name" (e.g. "bytedance/seedance-2.0").
   // If the admin pasted a bare model name without a slash, default the owner to "bytedance".
   const modelPath = /\//.test(model) ? model : `bytedance/${model}`;
-  const createResp = await fetch(`/replicate-proxy/models/${modelPath}/predictions`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      'Prefer': 'wait'
-    },
-    body: JSON.stringify({ input })
-  });
 
-  if (!createResp.ok) {
-    const t = await createResp.text();
-    throw new Error(`Replicate create ${createResp.status}: ${t.slice(0, 200)}`);
-  }
-  let pred = await createResp.json();
-
-  // Poll until terminal status
-  const startTs = Date.now();
-  const TIMEOUT_MS = 8 * 60 * 1000; // 8 min
-  while (pred.status === 'starting' || pred.status === 'processing') {
-    if (Date.now() - startTs > TIMEOUT_MS) {
-      throw new Error('Seedance 생성 시간 초과 (8분)');
-    }
-    await new Promise(r => setTimeout(r, 4000));
-    const p = await fetch(`/replicate-proxy/predictions/${pred.id}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+  // Submit prediction + poll to terminal state. Pulled into a helper so we
+  // can retry once on the E005 "input or output flagged as sensitive" error
+  // — that filter is probabilistic and the same images often pass on retry
+  // with a different seed.
+  async function _runPrediction(inputPayload){
+    const cr = await fetch(`/replicate-proxy/models/${modelPath}/predictions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'wait'
+      },
+      body: JSON.stringify({ input: inputPayload })
     });
-    if (!p.ok) {
-      const t = await p.text();
-      throw new Error(`Replicate poll ${p.status}: ${t.slice(0, 200)}`);
+    if (!cr.ok) {
+      const t = await cr.text();
+      throw new Error(`Replicate create ${cr.status}: ${t.slice(0, 200)}`);
     }
-    pred = await p.json();
-    console.log(`[Seedance] status=${pred.status}`);
+    let pr = await cr.json();
+    const startTs = Date.now();
+    const TIMEOUT_MS = 8 * 60 * 1000;
+    while (pr.status === 'starting' || pr.status === 'processing') {
+      if (Date.now() - startTs > TIMEOUT_MS) throw new Error('Seedance 생성 시간 초과 (8분)');
+      await new Promise(r => setTimeout(r, 4000));
+      const p = await fetch(`/replicate-proxy/predictions/${pr.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!p.ok) { const t = await p.text(); throw new Error(`Replicate poll ${p.status}: ${t.slice(0, 200)}`); }
+      pr = await p.json();
+      console.log(`[Seedance] status=${pr.status}`);
+    }
+    return pr;
   }
+
+  let pred = await _runPrediction(input);
+
+  // Retry once on the E005 sensitivity false-positive.
+  // The Seedance safety filter is probabilistic — same inputs sometimes pass
+  // and sometimes fail. We retry with a fresh seed and the prompt-augmentation
+  // suffix stripped (the long "do not zoom in / 줌인 금지" tail can occasionally
+  // confuse the moderation heuristics).
+  if (pred.status !== 'succeeded' && /E005|flagged as sensitive/i.test(pred.error || '')){
+    console.warn('[Seedance] E005 sensitive flag — retrying once with fresh seed + shorter prompt');
+    const retrySeed = Math.floor(Math.random() * 1e9);
+    const retryInput = buildInput(retrySeed);
+    // Strip the long bilingual augmentation suffix
+    retryInput.prompt = (retryInput.prompt || '')
+      .replace(/,?\s*카메라 줌인 금지[\s\S]*$/, '')
+      .replace(/,?\s*do not zoom in[\s\S]*$/i, '')
+      .trim();
+    console.log(`[Seedance] retry prompt="${retryInput.prompt.slice(0,80)}..." seed=${retrySeed}`);
+    pred = await _runPrediction(retryInput);
+  }
+
   if (pred.status !== 'succeeded') {
     throw new Error(`Seedance ${pred.status}: ${pred.error || 'unknown'}`);
   }
