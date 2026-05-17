@@ -12147,17 +12147,23 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
   if (!token) throw new Error('Replicate API Token이 설정되지 않았습니다');
 
   // PROMPT ENGINEERING for Seedance 2.0:
-  // The model treats `last_frame_image` as a soft hint and will follow the
-  // text prompt over the end-frame image. We need to PREPEND an explicit
-  // transition directive so the model knows to LAND on the target frame.
-  // We also DON'T append the Kling-style "do not zoom in" tail here —
-  // Seedance's attention budget is small at 480p and that 70+ char tail
-  // dilutes the end-frame guidance.
+  // Same root cause as the earlier Kling end-frame issue. For Kling we solved
+  // it with `cfg_scale: 0.2` (low scale = prompt weight ↓, image-anchor weight ↑).
+  // Seedance 2.0's Replicate schema has NO equivalent knob (no cfg_scale /
+  // guidance_scale / strength) so we can't tune the same way.
+  //
+  // Workaround: shorten/soften the prompt so it doesn't dominate the
+  // visual anchors. A long, directive motion prompt makes the model commit
+  // to its text plan and ignore last_frame_image. A short, generic
+  // transition hint lets the start/end images drive the result.
   const rawPrompt = (prompt || '').trim().replace(/[.,\s]+$/, '');
   if (endImg){
-    // Frame-to-frame mode: lead with end-frame anchor so the model treats
-    // it as the destination, not a stylistic suggestion.
-    prompt = `Smoothly transitions to the exact pose, framing, and composition of the last frame image. ${rawPrompt}. The final frame of the video MUST match the last frame image.`;
+    // Frame-to-frame mode (start image + end image):
+    // Use a minimal transition directive. We DO keep the original motion
+    // description, but trimmed and demoted to a parenthetical so the model
+    // weights it less heavily than the keyframe interpolation request.
+    const shortMotion = rawPrompt.length > 80 ? rawPrompt.slice(0, 80) + '…' : rawPrompt;
+    prompt = `Natural smooth transition from the first frame image to the last frame image. (${shortMotion})`;
   } else {
     prompt = rawPrompt;
   }
