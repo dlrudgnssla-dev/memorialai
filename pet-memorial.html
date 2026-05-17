@@ -12270,27 +12270,28 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
     const inp = {
       prompt: prompt || '',
       duration: dInt,
-      // 'adaptive' lets the model infer aspect ratio from the input images.
-      // In frame mode this also TRIGGERS the strict first-last-frame code
-      // path (per BytePlus docs). In reference mode it just lets the model
-      // pick the best ratio.
       aspect_ratio: 'adaptive',
       resolution,
-      generate_audio: false
+      generate_audio: false,
+      // Undocumented passthrough params — Replicate often forwards unknown
+      // fields to the underlying model. The official ByteDance ModelArk
+      // FLF endpoint accepts these; if Replicate's wrapper forwards them
+      // they should tighten end-frame adherence. If not, they're ignored.
+      // Mirrors the Kling cfg_scale=0.2 trick that fixed our end-frame
+      // issue there.
+      cfg_scale: 0.2,
+      guidance_scale: 1.0,
+      image_strength: 1.0,
+      last_frame_image_strength: 1.0,
+      last_image_strength: 1.0
     };
     if (Number.isFinite(seed)) inp.seed = seed;
 
     if (seedanceMode === 'reference' && endUrlS){
-      // REFERENCE MODE: send both images as references with @Image1/@Image2
-      // tags (Seedance uses @ prefix, not [Image1] brackets — per recent
-      // ByteDance docs/blog post).
       inp.reference_images = [startUrlS, endUrlS];
       const rawMotion = (prompt || '').replace(/^Natural smooth transition.*?\.\s*\(/, '').replace(/\)\s*$/, '').trim();
       inp.prompt = `Camera follows a smooth natural transition: starts in the exact pose of @Image1, ends in the exact pose of @Image2. ${rawMotion ? '(' + rawMotion + ')' : ''}`;
     } else {
-      // FRAME MODE — relies on `aspect_ratio: adaptive` to trigger strict
-      // FLF path. Keep the prompt minimal so the model isn't pulled toward
-      // a text-driven generation.
       inp[startField] = startUrlS;
       if (endUrlS) inp[endField] = endUrlS;
     }
@@ -12375,6 +12376,25 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
   const replicateUrl = Array.isArray(out) ? out[0] : (typeof out === 'string' ? out : null);
   if (!replicateUrl) throw new Error('Seedance 응답에 비디오 URL 없음');
   console.log(`[Seedance] done → ${replicateUrl}`);
+
+  // Diagnostic — dump everything Replicate sent back EXCEPT the output URLs
+  // and any data:* fields. We want to see logs, metrics, and any warnings
+  // about ignored parameters or fallback paths. Logs sometimes mention
+  // "ignored last_frame_image" or similar when the FLF code path didn't fire.
+  try {
+    const diag = {
+      id: pred.id,
+      version: pred.version,
+      status: pred.status,
+      logs: typeof pred.logs === 'string' ? pred.logs.slice(0, 2000) : pred.logs,
+      metrics: pred.metrics,
+      input_echo_keys: pred.input ? Object.keys(pred.input) : null,
+      input_echo_aspect: pred.input?.aspect_ratio,
+      input_echo_has_last: !!pred.input?.last_frame_image,
+      error: pred.error
+    };
+    console.log('[Seedance] prediction diagnostic:', diag);
+  } catch(_){}
 
   // Replicate delivery URLs are TEMPORARY (expire in ~24h with a 200-OK
   // JSON "requested file not found" body). Download immediately and host
