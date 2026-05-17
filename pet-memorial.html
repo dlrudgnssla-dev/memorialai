@@ -4677,15 +4677,26 @@
 
       <!-- NEW: Seedance via Replicate -->
       <div class="card-box ai-card">
-        <h3>Seedance (ByteDance · via Replicate)</h3>
-        <p class="muted">Replicate 토큰을 입력합니다. <a href="https://replicate.com/account/api-tokens" target="_blank" style="color:var(--accent)">→ 토큰 발급</a> 후 Seedance 모델 사용권 활성화</p>
+        <h3>Seedance 2.0 (ByteDance · via Replicate)</h3>
+        <p class="muted">Replicate 토큰을 입력합니다. <a href="https://replicate.com/account/api-tokens" target="_blank" style="color:var(--accent)">→ 토큰 발급</a> · <a href="https://replicate.com/bytedance/seedance-2.0" target="_blank" style="color:var(--accent)">→ Seedance 2.0 모델 페이지</a></p>
         <div class="field">
-          <label>Replicate 모델 (image-to-video)</label>
-          <input type="text" id="ai-seedance-model" value="bytedance/seedance-1-pro" list="seedance-models" />
+          <label>Replicate 모델</label>
+          <input type="text" id="ai-seedance-model" value="bytedance/seedance-2.0" list="seedance-models" />
           <datalist id="seedance-models">
-            <option value="bytedance/seedance-1-pro">Seedance 1 Pro (권장)</option>
-            <option value="bytedance/seedance-1-lite">Seedance 1 Lite</option>
+            <option value="bytedance/seedance-2.0">Seedance 2.0 (최신 · 권장)</option>
+            <option value="bytedance/seedance-1-pro">Seedance 1 Pro</option>
+            <option value="bytedance/seedance-1-lite">Seedance 1 Lite (저렴)</option>
           </datalist>
+        </div>
+        <div class="field">
+          <label>해상도</label>
+          <select id="ai-seedance-resolution" style="width:100%; padding:9px 12px; border:1px solid #ead8ca; border-radius:8px">
+            <option value="480p">480p (저렴 · $0.08/sec, 빠른 테스트용)</option>
+            <option value="720p">720p (고품질 · $0.18/sec)</option>
+          </select>
+          <div style="font-size:11px; color:var(--ink-soft); margin-top:4px">
+            Seedance 2.0 만 해상도 옵션 지원. 1.x 모델은 무시됨.
+          </div>
         </div>
         <div class="field">
           <label>Replicate API Token</label>
@@ -11521,9 +11532,10 @@ function loadAiKeysUI(){
     // NEW: OpenAI fields (default = gpt-image-2, the 2026.4 ChatGPT Images 2.0)
     ['#ai-openai-model', aiKeys.openai?.model || 'gpt-image-2', v=>{aiKeys.openai = aiKeys.openai || {}; aiKeys.openai.model = v;}],
     ['#ai-openai-key',   aiKeys.openai?.key   || '',            v=>{aiKeys.openai = aiKeys.openai || {}; aiKeys.openai.key = v;}],
-    // NEW: Seedance via Replicate fields
-    ['#ai-seedance-model', aiKeys.seedance?.model || 'bytedance/seedance-1-pro', v=>{aiKeys.seedance = aiKeys.seedance || {}; aiKeys.seedance.model = v;}],
-    ['#ai-seedance-token', aiKeys.seedance?.token || '',                          v=>{aiKeys.seedance = aiKeys.seedance || {}; aiKeys.seedance.token = v;}]
+    // NEW: Seedance via Replicate fields (default = 2.0 + 480p)
+    ['#ai-seedance-model',      aiKeys.seedance?.model      || 'bytedance/seedance-2.0', v=>{aiKeys.seedance = aiKeys.seedance || {}; aiKeys.seedance.model = v;}],
+    ['#ai-seedance-resolution', aiKeys.seedance?.resolution || '480p',                    v=>{aiKeys.seedance = aiKeys.seedance || {}; aiKeys.seedance.resolution = v;}],
+    ['#ai-seedance-token',      aiKeys.seedance?.token      || '',                        v=>{aiKeys.seedance = aiKeys.seedance || {}; aiKeys.seedance.token = v;}]
   ];
   for(const [sel, val, setter] of map){
     const el = $(sel); if(!el) continue;
@@ -11564,10 +11576,11 @@ window.saveAiKeys = ()=>{
       model: $('#ai-openai-model')?.value.trim() || 'gpt-image-2',
       key:   $('#ai-openai-key')?.value.trim()   || ''
     },
-    // NEW Seedance via Replicate
+    // NEW Seedance via Replicate (default 2.0 + 480p)
     seedance: {
-      model: $('#ai-seedance-model')?.value.trim() || 'bytedance/seedance-1-pro',
-      token: $('#ai-seedance-token')?.value.trim() || ''
+      model:      $('#ai-seedance-model')?.value.trim()      || 'bytedance/seedance-2.0',
+      resolution: $('#ai-seedance-resolution')?.value        || '480p',
+      token:      $('#ai-seedance-token')?.value.trim()      || ''
     }
   };
   store.set('aiKeys', aiKeys);
@@ -12112,7 +12125,8 @@ async function uploadImageToProxy(proxyBase, dataUrl){
 ============================================================ */
 async function callSeedanceClip(startImg, endImg, prompt, duration){
   const token = aiKeys.seedance?.token;
-  const model = (aiKeys.seedance?.model || 'bytedance/seedance-1-pro').trim();
+  const model = (aiKeys.seedance?.model || 'bytedance/seedance-2.0').trim();
+  const resolution = (aiKeys.seedance?.resolution || '480p').trim();
   if (!token) throw new Error('Replicate API Token이 설정되지 않았습니다');
 
   // Same small-framing enforcement we use for Kling
@@ -12121,31 +12135,30 @@ async function callSeedanceClip(startImg, endImg, prompt, duration){
       ', 카메라 줌인 금지, 피사체는 화면 가운데 55% 이하로 작게 유지, 모든 움직임은 충분한 여백 안쪽에서만 발생, do not zoom in, subject stays small within frame';
   }
 
-  // Replicate accepts image input as a data-URL string directly.
-  // We feed the start frame; if Seedance supports end-frame guidance
-  // we also pass it. (Defaults to start-only when unsupported.)
   const dInt = parseInt(duration) || 5;
 
-  console.log(`[Seedance] start prediction model=${model} duration=${dInt}s`);
+  // Build the input payload — Seedance 2.0 accepts `resolution`
+  // ('480p' / '720p'), older 1.x variants ignore it.
+  const input = {
+    image: startImg,
+    prompt: prompt || '',
+    duration: dInt,
+    aspect_ratio: '1:1',
+    resolution,
+    // last_frame supported by some Seedance variants — harmless to
+    // include; the API ignores unknown fields.
+    last_frame: endImg
+  };
+
+  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s`);
   const createResp = await fetch('https://api.replicate.com/v1/predictions', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
-      'Prefer': 'wait'   // long-poll up to 60s before falling back to async
+      'Prefer': 'wait'
     },
-    body: JSON.stringify({
-      model,                       // e.g. "bytedance/seedance-1-pro"
-      input: {
-        image: startImg,           // data URL or remote URL
-        prompt: prompt || '',
-        duration: dInt,
-        aspect_ratio: '1:1',
-        // last_frame is supported by some Seedance variants — harmless
-        // to include; if not supported the API ignores unknown fields.
-        last_frame: endImg
-      }
-    })
+    body: JSON.stringify({ model, input })
   });
 
   if (!createResp.ok) {
