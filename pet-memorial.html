@@ -9919,6 +9919,22 @@ if ((store.get('openaiModelVersion', 0) || 0) < OPENAI_MODEL_VERSION) {
   console.log('[init] OpenAI model migrated to gpt-image-2');
 }
 
+// One-shot migration: bump Seedance model from any 1.x variant → 2.0
+// + default resolution to 480p. Only runs once.
+const SEEDANCE_MODEL_VERSION = 2;
+if ((store.get('seedanceModelVersion', 0) || 0) < SEEDANCE_MODEL_VERSION) {
+  aiKeys.seedance = aiKeys.seedance || {};
+  if (!aiKeys.seedance.model || /seedance-1/i.test(aiKeys.seedance.model)) {
+    aiKeys.seedance.model = 'bytedance/seedance-2.0';
+  }
+  if (!aiKeys.seedance.resolution) {
+    aiKeys.seedance.resolution = '480p';
+  }
+  store.set('aiKeys', aiKeys);
+  store.set('seedanceModelVersion', SEEDANCE_MODEL_VERSION);
+  console.log('[init] Seedance model migrated to bytedance/seedance-2.0');
+}
+
 /* Default frame/clip prompts for each dog personality preset.
    Each entry: { frames: [3 strings], clips: [3 strings] }
    - frame 1: 정면 대표 자세 / frame 2: 측면·표정 변화 / frame 3: 행동·움직임
@@ -12151,7 +12167,10 @@ async function callSeedanceClip(startImg, endImg, prompt, duration){
   };
 
   console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s`);
-  const createResp = await fetch('https://api.replicate.com/v1/predictions', {
+  // Route through our server's CORS-safe proxy — browsers can't call
+  // api.replicate.com directly. The proxy forwards the Authorization
+  // header as-is and never persists the token.
+  const createResp = await fetch('/replicate-proxy/predictions', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -12175,7 +12194,7 @@ async function callSeedanceClip(startImg, endImg, prompt, duration){
       throw new Error('Seedance 생성 시간 초과 (8분)');
     }
     await new Promise(r => setTimeout(r, 4000));
-    const p = await fetch(`https://api.replicate.com/v1/predictions/${pred.id}`, {
+    const p = await fetch(`/replicate-proxy/predictions/${pred.id}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     if (!p.ok) {

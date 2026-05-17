@@ -516,6 +516,59 @@ app.get('/health', (_req, res) => {
 });
 
 // ============================================================
+// Replicate proxy — browsers can't call api.replicate.com directly
+// because of CORS. We forward POST /replicate-proxy/predictions and
+// GET  /replicate-proxy/predictions/:id from the authenticated client
+// to Replicate using the client-supplied Authorization header (the
+// admin's r8_... token). We never read or persist that token here.
+// ============================================================
+app.post('/replicate-proxy/predictions', express.json({ limit: '50mb' }), async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth || !/^Bearer\s+r8_/i.test(auth)) {
+    return res.status(400).json({ error: 'Authorization header (Bearer r8_...) missing or invalid' });
+  }
+  try {
+    const r = await fetch('https://api.replicate.com/v1/predictions', {
+      method: 'POST',
+      headers: {
+        'Authorization': auth,
+        'Content-Type': 'application/json',
+        'Prefer': req.headers['prefer'] || 'wait'
+      },
+      body: JSON.stringify(req.body || {})
+    });
+    const text = await r.text();
+    res.status(r.status)
+       .set('Content-Type', r.headers.get('content-type') || 'application/json')
+       .send(text);
+  } catch (e) {
+    console.error('[replicate-proxy POST] error:', e.message);
+    res.status(502).json({ error: 'upstream fetch failed: ' + e.message });
+  }
+});
+
+app.get('/replicate-proxy/predictions/:id', async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth || !/^Bearer\s+r8_/i.test(auth)) {
+    return res.status(400).json({ error: 'Authorization header (Bearer r8_...) missing or invalid' });
+  }
+  const id = req.params.id;
+  if (!/^[A-Za-z0-9]+$/.test(id)) return res.status(400).json({ error: 'bad prediction id' });
+  try {
+    const r = await fetch('https://api.replicate.com/v1/predictions/' + encodeURIComponent(id), {
+      headers: { 'Authorization': auth }
+    });
+    const text = await r.text();
+    res.status(r.status)
+       .set('Content-Type', r.headers.get('content-type') || 'application/json')
+       .send(text);
+  } catch (e) {
+    console.error('[replicate-proxy GET] error:', e.message);
+    res.status(502).json({ error: 'upstream fetch failed: ' + e.message });
+  }
+});
+
+// ============================================================
 // Global theme (admin-managed, all users adopt it).
 // Stored in data/theme.json. Anyone authenticated can GET (so the
 // member view picks up the latest skin). Only admin can POST.
