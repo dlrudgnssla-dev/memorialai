@@ -12226,26 +12226,67 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
   const startFieldCandidates = ['image', 'first_image', 'start_image', 'image_url', 'init_image'];
   const startField = startFieldCandidates.find(f => schemaFields.includes(f)) || 'image';
 
+  // SAME ROOT CAUSE AS KLING END-FRAME ISSUE:
+  // Replicate's image fields are declared `format: "uri"` in the model
+  // schema. Although data URIs are technically valid URIs, Seedance 2.0's
+  // `last_frame_image` adherence is much weaker with large inline base64
+  // than with a real HTTPS URL — same problem we solved with Kling by
+  // uploading frames to a proxy and passing back the public URL.
+  //
+  // Upload both start and end frames to our /img-cache/upload route here
+  // so Seedance fetches them as real images instead of decoding them
+  // from a megabyte-sized JSON payload.
+  async function _uploadFrameForSeedance(dataUrl, label){
+    // Resize and re-encode to JPEG first (same prep we do for Kling),
+    // then ship to the server. Target 1024px max side, JPEG q=0.92 keeps
+    // identity while shrinking 1.4MB PNG → ~200KB JPEG.
+    const small = await resizeDataUrl(dataUrl, 1024);
+    const b64 = dataUrlToBase64(small);
+    const ext = (dataUrlMime(small).split('/')[1] || 'jpg').replace('jpeg','jpg');
+    const r = await fetch('/img-cache/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ base64: b64, ext, label })
+    });
+    if (!r.ok) throw new Error(`img-cache ${label} failed: ${r.status}`);
+    const j = await r.json();
+    if (!j.url) throw new Error(`img-cache ${label}: no url`);
+    return j.url;
+  }
+  let startUrlS, endUrlS;
+  try {
+    [startUrlS, endUrlS] = await Promise.all([
+      _uploadFrameForSeedance(startImg, 'seedance-start'),
+      endImg ? _uploadFrameForSeedance(endImg, 'seedance-end') : Promise.resolve(null)
+    ]);
+    console.log(`[Seedance] images hosted → start=${startUrlS} end=${endUrlS || 'none'}`);
+  } catch(e){
+    // Fall back to inline data URIs if hosting fails — better than crashing.
+    console.warn('[Seedance] img-cache upload failed, falling back to data URI inputs:', e.message);
+    startUrlS = startImg;
+    endUrlS   = endImg || null;
+  }
+
   // generate_audio defaults to TRUE in Seedance 2.0 — we don't want it
   // (BGM is added later by the compose step) and audio TTS has stricter
   // content moderation that can trip the E005 sensitivity filter on
   // otherwise-innocent inputs.
   const buildInput = (seed) => {
     const inp = {
-      [startField]: startImg,
+      [startField]: startUrlS,
       prompt: prompt || '',
       duration: dInt,
       aspect_ratio: '1:1',
       resolution,
       generate_audio: false
     };
-    if (endImg) inp[endField] = endImg;
+    if (endUrlS) inp[endField] = endUrlS;
     if (Number.isFinite(seed)) inp.seed = seed;
     return inp;
   };
 
   let input = buildInput();
-  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s startField=${startField} endField=${endField} endSet=${endImg ? 'yes' : 'no'} audio=off`);
+  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s startField=${startField} endField=${endField} endSet=${endUrlS ? 'yes(url)' : 'no'} audio=off`);
   // Route through our server's CORS-safe proxy — browsers can't call
   // api.replicate.com directly. The proxy forwards the Authorization
   // header as-is and never persists the token.

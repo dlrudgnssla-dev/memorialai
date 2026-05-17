@@ -409,6 +409,10 @@ app.get('/__logout__', (_req, res) => {
 app.use((req, res, next) => {
   if (req.path === '/health' || req.path === '/__logout__' ||
       req.path === '/go'     || req.path === '/login') return next();
+  // Public image hosting — Replicate (and others) need to fetch these
+  // without our cookie. The filenames are random hex so nobody can
+  // discover other users' images.
+  if (req.method === 'GET' && req.path.startsWith('/img-cache/')) return next();
 
   let user, pass;
 
@@ -602,6 +606,15 @@ app.get('/replicate-proxy/models/:owner/:name', async (req, res) => {
       headers: { 'Authorization': auth }
     });
     const text = await r.text();
+    // Stash the schema to disk for local inspection — helps debug "why isn't
+    // last_image being honored?" by exposing strength / guidance parameters.
+    // Token is NOT stored. Path is debug-only, not served publicly.
+    if (r.ok) {
+      try {
+        const dbgFile = path.join(DATA_DIR, `_dbg-model-${owner}-${name}.json`);
+        fs.writeFileSync(dbgFile, text);
+      } catch(_){}
+    }
     res.status(r.status)
        .set('Content-Type', r.headers.get('content-type') || 'application/json')
        .send(text);
@@ -864,7 +877,14 @@ const VIDEO_DIR = path.join(DATA_DIR, 'videos');
 // Clip cache — permanent local copies of provider-generated clips
 // (Replicate / Kling temporary CDN URLs expire). One subdir per target.
 const CLIP_CACHE_DIR = path.join(DATA_DIR, 'clip-cache');
-[PIPE_DIR, VIDEO_DIR, CLIP_CACHE_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+// Image cache — public URL hosting for frame images.
+// Why: Replicate's image-input fields are declared `format: "uri"` in the
+// model schema. They prefer HTTPS URLs over inline base64 data URIs.
+// In particular, Seedance 2.0's `last_frame_image` field silently fails
+// to be honored when sent as a large data URI — same symptom we hit with
+// Kling, fixed there by upload-then-URL. Now applied to Seedance too.
+const IMG_CACHE_DIR = path.join(DATA_DIR, 'img-cache');
+[PIPE_DIR, VIDEO_DIR, CLIP_CACHE_DIR, IMG_CACHE_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 const SAFE_ID = /^[A-Za-z0-9_.-]+$/;
 
 // Helper: members can only touch backups for targets they own
@@ -1037,6 +1057,65 @@ app.get('/clip-cache/:targetId/:filename', (req, res) => {
   if (!fs.existsSync(file)) return res.status(404).end();
   res.setHeader('Content-Type', 'video/mp4');
   res.setHeader('Cache-Control', 'private, max-age=86400');
+  fs.createReadStream(file).pipe(res);
+});
+
+// ============================================================
+// Image cache — public URL hosting for frame images.
+//
+// POST /img-cache/upload   body { base64, ext, label? }
+//   → writes data/img-cache/<random>.<ext> and returns
+//     { url: '<host>/img-cache/<random>.<ext>' }
+//   The returned URL is publicly accessible (no auth on GET) so
+//   Replicate's worker can fetch it during prediction. We MUST NOT
+//   require auth on the GET — Replicate doesn't carry our cookie.
+//
+// GET  /img-cache/:filename  public, mp4-style streaming
+//
+// Lifetime: each upload gets a fresh random filename. Old files
+// accumulate; cleanup is manual (data/img-cache is git-ignored).
+// ============================================================
+app.post('/img-cache/upload', express.json({ limit: '50mb' }), (req, res) => {
+  const { base64, ext, label } = req.body || {};
+  if (!base64 || typeof base64 !== 'string') return res.status(400).json({ error: 'base64 required' });
+  const safeExt = (ext || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'jpg';
+  if (!/^(jpg|jpeg|png|webp)$/.test(safeExt)) return res.status(400).json({ error: 'bad ext' });
+  // Strip a leading data: prefix if present
+  const b64 = base64.replace(/^data:[^;]+;base64,/, '');
+  let buf;
+  try { buf = Buffer.from(b64, 'base64'); } catch (e) { return res.status(400).json({ error: 'bad base64' }); }
+  if (buf.length < 100) return res.status(400).json({ error: 'too small' });
+  if (buf.length > 20 * 1024 * 1024) return res.status(400).json({ error: 'too large (>20MB)' });
+  // Random filename — no need to make it predictable; we just need it
+  // unique and unguessable enough that nobody scrapes the directory.
+  const rand = require('crypto').randomBytes(9).toString('hex');
+  const fname = `${rand}.${safeExt === 'jpeg' ? 'jpg' : safeExt}`;
+  try {
+    fs.writeFileSync(path.join(IMG_CACHE_DIR, fname), buf);
+    // Build the public URL using the request's host (works behind
+    // Cloudflare tunnel — req.get('host') returns "memorialai.org").
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host  = req.headers['x-forwarded-host'] || req.get('host');
+    const url = `${proto}://${host}/img-cache/${fname}`;
+    console.log(`[img-cache user=${req.user.username}] saved ${fname} (${(buf.length/1024).toFixed(0)}KB) ${label ? '['+label+']' : ''}`);
+    res.json({ ok: true, url, filename: fname, bytes: buf.length });
+  } catch (e) {
+    console.error('[img-cache upload] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Public GET for the image — no auth gate (Replicate must be able to fetch it).
+// The auth middleware at the top of the file blocks /img-cache/* under its
+// generic rule; we whitelist this route shape there explicitly.
+app.get('/img-cache/:filename', (req, res) => {
+  const { filename } = req.params;
+  if (!/^[a-f0-9]{18}\.(jpg|png|webp)$/.test(filename)) return res.status(400).end();
+  const file = path.join(IMG_CACHE_DIR, filename);
+  if (!fs.existsSync(file)) return res.status(404).end();
+  const ext = filename.split('.').pop();
+  res.setHeader('Content-Type', ext === 'png' ? 'image/png' : (ext === 'webp' ? 'image/webp' : 'image/jpeg'));
+  res.setHeader('Cache-Control', 'public, max-age=3600');
   fs.createReadStream(file).pipe(res);
 });
 
