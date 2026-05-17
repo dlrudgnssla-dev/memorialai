@@ -12377,24 +12377,39 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
   if (!replicateUrl) throw new Error('Seedance 응답에 비디오 URL 없음');
   console.log(`[Seedance] done → ${replicateUrl}`);
 
-  // Diagnostic — dump everything Replicate sent back EXCEPT the output URLs
-  // and any data:* fields. We want to see logs, metrics, and any warnings
-  // about ignored parameters or fallback paths. Logs sometimes mention
-  // "ignored last_frame_image" or similar when the FLF code path didn't fire.
+  // Diagnostic — broken into individual console lines so nothing gets
+  // truncated. We need to see:
+  //   1) FULL logs (model may print warnings about ignored params)
+  //   2) WHICH input keys Replicate echoed back — that tells us whether
+  //      our undocumented passthroughs (cfg_scale, guidance_scale, ...)
+  //      were accepted by the underlying model or silently dropped.
+  //   3) The aspect_ratio Replicate received (adaptive vs something else).
   try {
-    const diag = {
-      id: pred.id,
-      version: pred.version,
-      status: pred.status,
-      logs: typeof pred.logs === 'string' ? pred.logs.slice(0, 2000) : pred.logs,
-      metrics: pred.metrics,
-      input_echo_keys: pred.input ? Object.keys(pred.input) : null,
-      input_echo_aspect: pred.input?.aspect_ratio,
-      input_echo_has_last: !!pred.input?.last_frame_image,
-      error: pred.error
-    };
-    console.log('[Seedance] prediction diagnostic:', diag);
-  } catch(_){}
+    console.log('[Seedance diag] id=', pred.id, 'version=', pred.version, 'status=', pred.status);
+    console.log('[Seedance diag] metrics:', pred.metrics);
+    if (pred.input){
+      console.log('[Seedance diag] input keys echoed back:', Object.keys(pred.input));
+      console.log('[Seedance diag] input.aspect_ratio echoed:', pred.input.aspect_ratio);
+      console.log('[Seedance diag] input.duration echoed:', pred.input.duration);
+      console.log('[Seedance diag] input.cfg_scale echoed:', pred.input.cfg_scale);
+      console.log('[Seedance diag] input.guidance_scale echoed:', pred.input.guidance_scale);
+      console.log('[Seedance diag] input.image_strength echoed:', pred.input.image_strength);
+      console.log('[Seedance diag] input.last_frame_image_strength echoed:', pred.input.last_frame_image_strength);
+      console.log('[Seedance diag] input.last_image_strength echoed:', pred.input.last_image_strength);
+      console.log('[Seedance diag] input.last_frame_image set:', !!pred.input.last_frame_image);
+    }
+    // FULL logs — split into lines so console doesn't truncate
+    if (typeof pred.logs === 'string'){
+      const lines = pred.logs.split('\n');
+      console.log(`[Seedance diag] model logs (${lines.length} lines):`);
+      lines.forEach((line, i) => console.log(`  ${i+1}: ${line}`));
+    } else if (pred.logs){
+      console.log('[Seedance diag] model logs (non-string):', pred.logs);
+    }
+    if (pred.error) console.log('[Seedance diag] error:', pred.error);
+  } catch(e){
+    console.warn('[Seedance diag] dump failed:', e.message);
+  }
 
   // Replicate delivery URLs are TEMPORARY (expire in ~24h with a 200-OK
   // JSON "requested file not found" body). Download immediately and host
