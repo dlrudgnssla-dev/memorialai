@@ -6566,24 +6566,15 @@ async function _onbGenerateHero(){
   }
   _onbSetMakeStatus('AI에게 대표 이미지를 부탁하는 중…');
   try {
-    // Pick the hero prompt based on admin-selected style.
-    // - 'single' (default): one front-facing portrait
-    // - 'sheet': character-reference sheet (4 views of same subject)
-    // Each style has its own positive prompt; the negative prompt is
-    // shared with frame generation (no point duplicating).
-    const style = imagePrompts.heroStyle || DEFAULT_PROMPTS.heroStyle || 'single';
-    const isAnimal = (pipelineState.kind === 'animal');
-    let basePrompt;
-    if (style === 'sheet') {
-      basePrompt = (isAnimal
-        ? (imagePrompts.heroAnimalSheet || DEFAULT_PROMPTS.heroAnimalSheet)
-        : (imagePrompts.heroPersonSheet || DEFAULT_PROMPTS.heroPersonSheet));
-    } else {
-      basePrompt = (isAnimal
-        ? (imagePrompts.heroAnimalSingle || DEFAULT_PROMPTS.heroAnimalSingle || imagePrompts.animalPos)
-        : (imagePrompts.heroPersonSingle || DEFAULT_PROMPTS.heroPersonSingle || imagePrompts.personPos));
-    }
-    const negPrompt = (isAnimal ? imagePrompts.animalNeg : imagePrompts.personNeg);
+    const heroBundle = pickHeroPrompts();
+    const basePrompt = heroBundle.basePrompt;
+    const negPrompt  = heroBundle.negPrompt;
+    console.log('[onb hero] style=', heroBundle.style, '| prompt prefix:', basePrompt.slice(0, 80));
+    _onbSetMakeStatus(
+      heroBundle.style === 'sheet'
+        ? '캐릭터 시트 스타일로 대표 이미지 생성 중…'
+        : '대표 이미지 생성 중…'
+    );
 
     // The reference-fidelity instruction MUST come first so Gemini
     // doesn't drown it in style/background hints further down.
@@ -9837,6 +9828,28 @@ const DEFAULT_PROMPTS = {
   heroAnimalSheet: 'a clean character reference sheet of one single animal subject, four views of the SAME individual arranged in a 2x2 grid on a pure black empty studio background: top-left = front view full body, top-right = 3/4 turn full body, bottom-left = side profile full body, bottom-right = back view full body. All four views show the IDENTICAL animal — same breed, same coat colors and markings, same eye color, same body proportions. Photorealistic, studio lighting, eye-level on every panel, equal spacing between panels, each view is a separate clean cutout on black, no labels, no text, no captions, no borders, the entire image is a pure black studio with the four poses floating in space',
   heroPersonSheet: 'a clean character reference sheet of one single person, four views of the SAME individual arranged in a 2x2 grid on a pure black empty studio background: top-left = front view medium portrait, top-right = 3/4 turn medium portrait, bottom-left = side profile medium portrait, bottom-right = subtle smile expression medium portrait. All four views show the IDENTICAL person — same face, same hair, same eye color, same skin tone, same age, same clothing. Photorealistic, soft studio lighting, eye-level on every panel, equal spacing between panels, no labels, no text, no captions, no borders, the entire image is a pure black studio with the four portraits floating in space'
 };
+
+/* Shared hero-prompt picker. Used by:
+   - Member wizard's _onbGenerateHero
+   - Admin pipeline page's regenRepBtn / runPipeline → generateRepImage
+   Reads imagePrompts.heroStyle (admin's selection) and returns the
+   appropriate basePrompt + negPrompt for the current pipelineState.kind. */
+function pickHeroPrompts(){
+  const style = imagePrompts.heroStyle || DEFAULT_PROMPTS.heroStyle || 'single';
+  const isAnimal = (pipelineState.kind === 'animal');
+  let basePrompt;
+  if (style === 'sheet') {
+    basePrompt = (isAnimal
+      ? (imagePrompts.heroAnimalSheet || DEFAULT_PROMPTS.heroAnimalSheet)
+      : (imagePrompts.heroPersonSheet || DEFAULT_PROMPTS.heroPersonSheet));
+  } else {
+    basePrompt = (isAnimal
+      ? (imagePrompts.heroAnimalSingle || DEFAULT_PROMPTS.heroAnimalSingle || imagePrompts.animalPos)
+      : (imagePrompts.heroPersonSingle || DEFAULT_PROMPTS.heroPersonSingle || imagePrompts.personPos));
+  }
+  const negPrompt = (isAnimal ? imagePrompts.animalNeg : imagePrompts.personNeg);
+  return { style, basePrompt, negPrompt };
+}
 
 /* ============================================================
    SMALL-FRAMING ENFORCEMENT
@@ -13319,13 +13332,22 @@ async function runPipeline(){
   let hadError = false;
 
   try {
+    // basePrompt/negPrompt = FRAME prompt (used by subsequent frame
+    // generation steps). For the REP image we use the admin-selected
+    // hero prompt instead (single or character-sheet style).
     const basePrompt = ensureSmallFraming(pipelineState.kind === 'animal' ? imagePrompts.animalPos : imagePrompts.personPos);
     const negPrompt = ensureSmallFramingNeg(pipelineState.kind === 'animal' ? imagePrompts.animalNeg : imagePrompts.personNeg);
+    const heroBundle = pickHeroPrompts();
 
-    // 2) Generate REPRESENTATIVE IMAGE first
+    // 2) Generate REPRESENTATIVE IMAGE first (using hero prompt, not frame prompt)
     prog.setStep('① 대표 이미지 생성');
-    prog.setSubStep('Gemini로 대표 이미지를 만드는 중...');
-    const repImg = await generateRepImage(basePrompt, negPrompt);
+    prog.setSubStep(
+      heroBundle.style === 'sheet'
+        ? '캐릭터 시트 스타일로 대표 이미지 생성 중...'
+        : 'Gemini로 대표 이미지를 만드는 중...'
+    );
+    console.log('[runPipeline rep] style=', heroBundle.style);
+    const repImg = await generateRepImage(heroBundle.basePrompt, heroBundle.negPrompt);
     if(!repImg){
       prog.log('대표 이미지 실패', 'err');
       throw new Error('대표 이미지 생성 실패 — 위 박스의 에러를 확인하세요');
@@ -14307,9 +14329,11 @@ async function initPipelinePage(){
 
   $('#runBtn').onclick = runPipeline;
   $('#regenRepBtn').onclick = async ()=>{
-    const basePrompt = ensureSmallFraming(pipelineState.kind === 'animal' ? imagePrompts.animalPos : imagePrompts.personPos);
-    const negPrompt = ensureSmallFramingNeg(pipelineState.kind === 'animal' ? imagePrompts.animalNeg : imagePrompts.personNeg);
-    await generateRepImage(basePrompt, negPrompt);
+    // Use the admin-selected hero style (single / sheet) instead of
+    // the frame's animal/personPos. This is the rep-image regenerator.
+    const hero = pickHeroPrompts();
+    console.log('[admin hero regen] style=', hero.style);
+    await generateRepImage(hero.basePrompt, hero.negPrompt);
   };
   const rerunF = $('#rerunFramesBtn');   if(rerunF)  rerunF.onclick = runFromFrames;
   const rerunC = $('#rerunClipsBtn');    if(rerunC)  rerunC.onclick = runFromClips;
