@@ -4451,6 +4451,55 @@
         </div>
       </div>
 
+      <!-- NEW: Hero (rep image) prompts — separate from frame prompts -->
+      <div class="card-box">
+        <h3>🌟 대표 이미지 (Hero) 프롬프트</h3>
+        <p class="muted">마법사 첫 단계에서 만들어지는 대표 이미지 전용 프롬프트입니다. 두 가지 스타일 중 하나를 선택하세요.</p>
+
+        <div class="prompt-group">
+          <div class="prompt-head">
+            <label>대표 이미지 스타일</label>
+          </div>
+          <select id="hero-style" style="width:100%; padding:10px; border:1px solid #ead8ca; border-radius:8px; background:#fff; font-size:13px">
+            <option value="single">단일 포즈 (기본 · 정면 1장)</option>
+            <option value="sheet">캐릭터 시트 (4-view reference sheet · frame 일관성 ↑)</option>
+          </select>
+          <div style="font-size:11px; color:var(--ink-soft); margin-top:6px">
+            <b>단일</b>: 정면 한 컷의 자연스러운 포즈. 빠르고 단순.<br>
+            <b>캐릭터 시트</b>: 같은 피사체의 정면·3/4·측면·후면(또는 표정) 4컷을 한 장에 모은 reference sheet. 이후 frame 생성 시 identity 가 훨씬 강하게 유지됨.
+          </div>
+        </div>
+
+        <div class="prompt-group">
+          <div class="prompt-head">
+            <label>🐾 동물 — 단일 포즈 프롬프트</label>
+            <button class="btn ghost xs" onclick="resetPrompt('heroAnimalSingle')">↻ 리셋</button>
+          </div>
+          <textarea id="prompt-heroAnimalSingle" rows="4" placeholder="동물 대표 이미지 단일 포즈 프롬프트"></textarea>
+        </div>
+        <div class="prompt-group">
+          <div class="prompt-head">
+            <label>🐾 동물 — 캐릭터 시트 프롬프트</label>
+            <button class="btn ghost xs" onclick="resetPrompt('heroAnimalSheet')">↻ 리셋</button>
+          </div>
+          <textarea id="prompt-heroAnimalSheet" rows="6" placeholder="동물 대표 이미지 캐릭터 시트 프롬프트"></textarea>
+        </div>
+        <div class="prompt-group">
+          <div class="prompt-head">
+            <label>👤 인물 — 단일 포즈 프롬프트</label>
+            <button class="btn ghost xs" onclick="resetPrompt('heroPersonSingle')">↻ 리셋</button>
+          </div>
+          <textarea id="prompt-heroPersonSingle" rows="4" placeholder="인물 대표 이미지 단일 포즈 프롬프트"></textarea>
+        </div>
+        <div class="prompt-group">
+          <div class="prompt-head">
+            <label>👤 인물 — 캐릭터 시트 프롬프트</label>
+            <button class="btn ghost xs" onclick="resetPrompt('heroPersonSheet')">↻ 리셋</button>
+          </div>
+          <textarea id="prompt-heroPersonSheet" rows="6" placeholder="인물 대표 이미지 캐릭터 시트 프롬프트"></textarea>
+        </div>
+      </div>
+
       <div class="save-bar">
         <button class="btn" onclick="saveImagePrompts()">변경사항 저장</button>
       </div>
@@ -6517,14 +6566,24 @@ async function _onbGenerateHero(){
   }
   _onbSetMakeStatus('AI에게 대표 이미지를 부탁하는 중…');
   try {
-    // Use the bare positive/negative prompts WITHOUT the small-framing
-    // boost on the hero step — that aggressive framing hint was making
-    // Gemini ignore the reference photo and synthesize a fresh subject
-    // that looked nothing like the user's pet. Framing only matters for
-    // the motion clips later; the hero just needs to faithfully match
-    // the reference.
-    const basePrompt = (pipelineState.kind === 'animal' ? imagePrompts.animalPos : imagePrompts.personPos);
-    const negPrompt  = (pipelineState.kind === 'animal' ? imagePrompts.animalNeg : imagePrompts.personNeg);
+    // Pick the hero prompt based on admin-selected style.
+    // - 'single' (default): one front-facing portrait
+    // - 'sheet': character-reference sheet (4 views of same subject)
+    // Each style has its own positive prompt; the negative prompt is
+    // shared with frame generation (no point duplicating).
+    const style = imagePrompts.heroStyle || DEFAULT_PROMPTS.heroStyle || 'single';
+    const isAnimal = (pipelineState.kind === 'animal');
+    let basePrompt;
+    if (style === 'sheet') {
+      basePrompt = (isAnimal
+        ? (imagePrompts.heroAnimalSheet || DEFAULT_PROMPTS.heroAnimalSheet)
+        : (imagePrompts.heroPersonSheet || DEFAULT_PROMPTS.heroPersonSheet));
+    } else {
+      basePrompt = (isAnimal
+        ? (imagePrompts.heroAnimalSingle || DEFAULT_PROMPTS.heroAnimalSingle || imagePrompts.animalPos)
+        : (imagePrompts.heroPersonSingle || DEFAULT_PROMPTS.heroPersonSingle || imagePrompts.personPos));
+    }
+    const negPrompt = (isAnimal ? imagePrompts.animalNeg : imagePrompts.personNeg);
 
     // The reference-fidelity instruction MUST come first so Gemini
     // doesn't drown it in style/background hints further down.
@@ -9757,13 +9816,26 @@ let currentPreset = { frame:'활기찬', video:'활기찬', bgm:'활기찬' };
 
 /* ---- defaults ---- */
 const DEFAULT_PROMPTS = {
+  // === Frame/clip default prompts (unchanged) ===
   // Positive prompts describe ONLY what to depict — single subject, empty
   // black studio, central 55% composition with generous margins. Anything
   // we want to avoid lives in the negative prompt below.
   animalPos: 'full body shot of a single animal depicted alone, studio lighting, 50mm lens, eye-level, soft natural pose, pure black empty studio background, photorealistic, high detail, the subject occupies the central 55% of the frame with roughly 22% empty margin on each side, wide framing with generous breathing room around the subject, the surrounding space is entirely empty black studio',
   animalNeg: 'text, watermark, logo, props, toys, balls, bones, leash, collar tag, food bowl, blanket, pillow, furniture, plants, flowers, hands, arms, owner, person, human, child, baby, family member, fingers, other animals, second pet, other dog, other cat, multiple animals, two animals, group, pack, litter, scenery, room, background scenery, gradient background, white background, colored background, blurry, low quality, distorted, extra limbs, subject filling the entire frame, subject cropped, subject too close to edge, tight framing, body parts cut off',
   personPos: 'medium portrait of a single person depicted alone, soft studio lighting, eye-level, calm warm expression, pure black empty studio background, photorealistic, high detail, the subject occupies the central 55% of the frame with roughly 22% empty margin on each side, wide framing with generous breathing room around the subject, the surrounding space is entirely empty black studio',
-  personNeg: 'text, watermark, props, glasses prop, hats prop, accessories, jewelry, microphone, instruments, pets, animals, dog, cat, second person, multiple people, two people, group, family, friends, child held in arms, hand of someone else, other person, scenery, room, furniture, gradient background, white background, colored background, blurry, low quality, distorted face, head cropped, subject cropped, subject too close to edge, tight framing'
+  personNeg: 'text, watermark, props, glasses prop, hats prop, accessories, jewelry, microphone, instruments, pets, animals, dog, cat, second person, multiple people, two people, group, family, friends, child held in arms, hand of someone else, other person, scenery, room, furniture, gradient background, white background, colored background, blurry, low quality, distorted face, head cropped, subject cropped, subject too close to edge, tight framing',
+
+  // === Hero (rep image) prompts — admin can pick which style to use ===
+  // heroStyle: 'single' (one front-facing portrait) | 'sheet' (multi-view character sheet)
+  heroStyle: 'single',
+
+  // SINGLE = current behavior (one natural front-facing portrait)
+  heroAnimalSingle: 'full body shot of a single animal in a natural front-facing memorial pose, studio lighting, eye-level, calm expression, pure black empty studio background, photorealistic, high detail, the subject occupies the central 55% of the frame with roughly 22% empty margin on each side, wide framing, surrounding space is entirely empty black studio',
+  heroPersonSingle: 'medium portrait of a single person in a calm natural front-facing pose, soft studio lighting, eye-level, warm gentle expression, pure black empty studio background, photorealistic, high detail, the subject occupies the central 55% of the frame with generous empty margin on each side',
+
+  // SHEET = character-sheet style — 4 views of the SAME subject for stronger downstream identity preservation
+  heroAnimalSheet: 'a clean character reference sheet of one single animal subject, four views of the SAME individual arranged in a 2x2 grid on a pure black empty studio background: top-left = front view full body, top-right = 3/4 turn full body, bottom-left = side profile full body, bottom-right = back view full body. All four views show the IDENTICAL animal — same breed, same coat colors and markings, same eye color, same body proportions. Photorealistic, studio lighting, eye-level on every panel, equal spacing between panels, each view is a separate clean cutout on black, no labels, no text, no captions, no borders, the entire image is a pure black studio with the four poses floating in space',
+  heroPersonSheet: 'a clean character reference sheet of one single person, four views of the SAME individual arranged in a 2x2 grid on a pure black empty studio background: top-left = front view medium portrait, top-right = 3/4 turn medium portrait, bottom-left = side profile medium portrait, bottom-right = subtle smile expression medium portrait. All four views show the IDENTICAL person — same face, same hair, same eye color, same skin tone, same age, same clothing. Photorealistic, soft studio lighting, eye-level on every panel, equal spacing between panels, no labels, no text, no captions, no borders, the entire image is a pure black studio with the four portraits floating in space'
 };
 
 /* ============================================================
@@ -10924,12 +10996,18 @@ if ((store.get('promptSuffixVersion', 0) || 0) < PROMPT_SUFFIX_VERSION) {
    IMAGE TAB
 ============================================================ */
 function loadImagePromptsUI(){
-  const ids = ['animalPos','animalNeg','personPos','personNeg'];
+  // Frame/clip prompts + new hero prompts. We fall back to
+  // DEFAULT_PROMPTS for any key that hasn't been customized yet so a
+  // freshly-loaded admin sees the recommended defaults pre-filled.
+  const ids = [
+    'animalPos','animalNeg','personPos','personNeg',
+    'heroAnimalSingle','heroAnimalSheet',
+    'heroPersonSingle','heroPersonSheet'
+  ];
   for(const k of ids){
     const el = $('#prompt-'+k);
     if(!el) continue;
-    el.value = imagePrompts[k] || '';
-    // auto-save on every keystroke (debounced)
+    el.value = imagePrompts[k] || DEFAULT_PROMPTS[k] || '';
     let t;
     el.oninput = ()=>{
       clearTimeout(t);
@@ -10938,6 +11016,16 @@ function loadImagePromptsUI(){
         store.set('imagePrompts', imagePrompts);
         showSavedDot(el);
       }, 400);
+    };
+  }
+  // Hero style selector (single vs character sheet)
+  const styleEl = $('#hero-style');
+  if (styleEl) {
+    styleEl.value = imagePrompts.heroStyle || DEFAULT_PROMPTS.heroStyle || 'single';
+    styleEl.onchange = () => {
+      imagePrompts.heroStyle = styleEl.value;
+      store.set('imagePrompts', imagePrompts);
+      showSavedDot(styleEl);
     };
   }
 }
@@ -10961,10 +11049,17 @@ window.resetPrompt = key =>{
 };
 window.saveImagePrompts = ()=>{
   imagePrompts = {
-    animalPos: $('#prompt-animalPos').value,
-    animalNeg: $('#prompt-animalNeg').value,
-    personPos: $('#prompt-personPos').value,
-    personNeg: $('#prompt-personNeg').value
+    // Frame/clip prompts (unchanged)
+    animalPos: $('#prompt-animalPos')?.value || '',
+    animalNeg: $('#prompt-animalNeg')?.value || '',
+    personPos: $('#prompt-personPos')?.value || '',
+    personNeg: $('#prompt-personNeg')?.value || '',
+    // Hero prompts + style selector
+    heroStyle:        $('#hero-style')?.value || 'single',
+    heroAnimalSingle: $('#prompt-heroAnimalSingle')?.value || DEFAULT_PROMPTS.heroAnimalSingle,
+    heroAnimalSheet:  $('#prompt-heroAnimalSheet')?.value  || DEFAULT_PROMPTS.heroAnimalSheet,
+    heroPersonSingle: $('#prompt-heroPersonSingle')?.value || DEFAULT_PROMPTS.heroPersonSingle,
+    heroPersonSheet:  $('#prompt-heroPersonSheet')?.value  || DEFAULT_PROMPTS.heroPersonSheet
   };
   store.set('imagePrompts', imagePrompts);
   flashToast('이미지 프롬프트가 저장되었습니다');
