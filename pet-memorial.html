@@ -12146,13 +12146,28 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
   const resolution = (aiKeys.seedance?.resolution || '480p').trim();
   if (!token) throw new Error('Replicate API Token이 설정되지 않았습니다');
 
-  // Same small-framing enforcement we use for Kling
-  if (prompt && !/줌인 금지|do not zoom in|stays small/i.test(prompt)){
-    prompt = (prompt.trim().replace(/[.,\s]+$/, '')) +
-      ', 카메라 줌인 금지, 피사체는 화면 가운데 55% 이하로 작게 유지, 모든 움직임은 충분한 여백 안쪽에서만 발생, do not zoom in, subject stays small within frame';
+  // PROMPT ENGINEERING for Seedance 2.0:
+  // The model treats `last_frame_image` as a soft hint and will follow the
+  // text prompt over the end-frame image. We need to PREPEND an explicit
+  // transition directive so the model knows to LAND on the target frame.
+  // We also DON'T append the Kling-style "do not zoom in" tail here —
+  // Seedance's attention budget is small at 480p and that 70+ char tail
+  // dilutes the end-frame guidance.
+  const rawPrompt = (prompt || '').trim().replace(/[.,\s]+$/, '');
+  if (endImg){
+    // Frame-to-frame mode: lead with end-frame anchor so the model treats
+    // it as the destination, not a stylistic suggestion.
+    prompt = `Smoothly transitions to the exact pose, framing, and composition of the last frame image. ${rawPrompt}. The final frame of the video MUST match the last frame image.`;
+  } else {
+    prompt = rawPrompt;
   }
 
-  const dInt = parseInt(duration) || 5;
+  // Seedance's `last_frame_image` adherence is much better at SHORT durations.
+  // Long clips give the model too much room to wander away from the target.
+  // Cap at 5s when an end frame is supplied. User's clip duration setting
+  // still flows through for clips without an end frame.
+  const userDur = parseInt(duration) || 5;
+  const dInt = endImg ? Math.min(userDur, 5) : userDur;
 
   // Discover the EXACT schema field names. Cache on window per model.
   // (Cache key intentionally includes a version suffix so changes here
