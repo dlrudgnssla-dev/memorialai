@@ -12154,24 +12154,52 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
 
   const dInt = parseInt(duration) || 5;
 
-  // Build the input payload — Seedance 2.0 accepts `resolution`
-  // ('480p' / '720p'), older 1.x variants ignore it.
-  // Replicate's bytedance/seedance-2.0 schema (verified via model README on
-  // replicate.com): the END frame field is `last_image` — NOT `last_frame`,
-  // `end_image`, or `last_frame_url` (those are fal.ai / wavespeed / BytePlus
-  // alternates). Other platforms use different names so this is a known footgun.
-  // If the field is omitted, Seedance generates motion freely from the start
-  // image; passing it makes the model interpolate toward the target frame.
+  // Discover the EXACT schema field names once per page load. Different
+  // platforms use different names for the end-frame ("last_image" vs
+  // "end_image" vs "image_last") and we've been guessing. Cache result on
+  // window so subsequent calls don't re-fetch.
+  if (!window._seedanceSchema){
+    try {
+      const sr = await fetch(`/replicate-proxy/models/${model}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (sr.ok){
+        const meta = await sr.json();
+        const props = meta?.latest_version?.openapi_schema?.components?.schemas?.Input?.properties || {};
+        const fields = Object.keys(props);
+        window._seedanceSchema = { fields, props };
+        console.log(`[Seedance schema] model=${model} input fields:`, fields);
+        // Highlight image-related fields specifically
+        const imageFields = fields.filter(f => /image|frame/i.test(f));
+        console.log(`[Seedance schema] image/frame fields:`, imageFields);
+        imageFields.forEach(f => console.log(`  - ${f}:`, props[f]));
+      } else {
+        console.warn('[Seedance schema] fetch failed:', sr.status, await sr.text().catch(()=>''));
+      }
+    } catch(e){ console.warn('[Seedance schema] error:', e.message); }
+  }
+
+  // Pick the END-frame field name from the schema instead of hardcoding.
+  // Order = preferred → fallback. Replicate sometimes renames between
+  // versions and we want to be robust.
+  const endFieldCandidates = ['last_image', 'last_frame_image', 'end_image', 'last_frame', 'image_last', 'tail_image'];
+  const schemaFields = window._seedanceSchema?.fields || [];
+  const endField = endFieldCandidates.find(f => schemaFields.includes(f)) || 'last_image';
+
+  // Similarly resolve START-frame field name (typically `image` but verify).
+  const startFieldCandidates = ['image', 'first_image', 'start_image', 'image_url', 'init_image'];
+  const startField = startFieldCandidates.find(f => schemaFields.includes(f)) || 'image';
+
   const input = {
-    image: startImg,
+    [startField]: startImg,
     prompt: prompt || '',
     duration: dInt,
     aspect_ratio: '1:1',
     resolution
   };
-  if (endImg) input.last_image = endImg;
+  if (endImg) input[endField] = endImg;
 
-  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s last_image=${endImg ? 'set' : 'none'}`);
+  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s startField=${startField} endField=${endField} endSet=${endImg ? 'yes' : 'no'}`);
   // Route through our server's CORS-safe proxy — browsers can't call
   // api.replicate.com directly. The proxy forwards the Authorization
   // header as-is and never persists the token.

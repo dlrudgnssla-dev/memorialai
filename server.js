@@ -583,6 +583,34 @@ app.post('/replicate-proxy/models/:owner/:name/predictions',
     }
   });
 
+// GET /replicate-proxy/models/{owner}/{name}
+// Returns the model object including openapi_schema (input field names + types).
+// Used for runtime schema discovery — we don't want to hardcode field names
+// because providers like Replicate / fal.ai / WaveSpeed each use different
+// names for the same Seedance feature (e.g. "last_image" vs "end_image_url").
+app.get('/replicate-proxy/models/:owner/:name', async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth || !/^Bearer\s+r8_/i.test(auth)) {
+    return res.status(400).json({ error: 'Authorization header (Bearer r8_...) missing or invalid' });
+  }
+  const { owner, name } = req.params;
+  if (!/^[A-Za-z0-9._-]+$/.test(owner) || !/^[A-Za-z0-9._-]+$/.test(name)) {
+    return res.status(400).json({ error: 'bad owner/name' });
+  }
+  try {
+    const r = await fetch(`https://api.replicate.com/v1/models/${owner}/${name}`, {
+      headers: { 'Authorization': auth }
+    });
+    const text = await r.text();
+    res.status(r.status)
+       .set('Content-Type', r.headers.get('content-type') || 'application/json')
+       .send(text);
+  } catch (e) {
+    console.error('[replicate-proxy model GET] error:', e.message);
+    res.status(502).json({ error: 'upstream fetch failed: ' + e.message });
+  }
+});
+
 app.get('/replicate-proxy/predictions/:id', async (req, res) => {
   const auth = req.headers.authorization;
   if (!auth || !/^Bearer\s+r8_/i.test(auth)) {
