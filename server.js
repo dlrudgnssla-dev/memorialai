@@ -833,7 +833,10 @@ app.post('/backup', (req, res) => {
 // ============================================================
 const PIPE_DIR  = path.join(DATA_DIR, 'pipes');
 const VIDEO_DIR = path.join(DATA_DIR, 'videos');
-[PIPE_DIR, VIDEO_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+// Clip cache — permanent local copies of provider-generated clips
+// (Replicate / Kling temporary CDN URLs expire). One subdir per target.
+const CLIP_CACHE_DIR = path.join(DATA_DIR, 'clip-cache');
+[PIPE_DIR, VIDEO_DIR, CLIP_CACHE_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 const SAFE_ID = /^[A-Za-z0-9_.-]+$/;
 
 // Helper: members can only touch backups for targets they own
@@ -948,6 +951,65 @@ app.delete('/video-backup/:targetId', (req, res) => {
     if (fs.existsSync(pipeFile)) fs.unlinkSync(pipeFile);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ============================================================
+// Clip cache — save remote provider clips to local disk so the
+// generated video survives Replicate / Kling CDN URL expiry.
+//
+//   POST /clip-cache/save   body { url, targetId, clipIdx }
+//     → downloads url, writes to data/clip-cache/<targetId>/<clipIdx>.mp4
+//     → returns { url: '/clip-cache/<targetId>/<clipIdx>.mp4', bytes }
+//
+//   GET  /clip-cache/:targetId/:filename  (auth + owner-only)
+//     → serves the saved mp4
+// ============================================================
+app.post('/clip-cache/save', express.json({ limit: '1mb' }), async (req, res) => {
+  const { url, targetId, clipIdx } = req.body || {};
+  if (!url || !/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'url required (http/https)' });
+  if (!targetId || !SAFE_ID.test(String(targetId))) return res.status(400).json({ error: 'bad targetId' });
+  const idx = Number.parseInt(clipIdx, 10);
+  if (!Number.isFinite(idx) || idx < 0 || idx > 999) return res.status(400).json({ error: 'bad clipIdx' });
+  // denyIfNotOwned reads req.params.targetId; on this POST route we get it
+  // from the body, so plant it into params for the shared check.
+  req.params = req.params || {};
+  req.params.targetId = String(targetId);
+  if (denyIfNotOwned(req, res)) return;
+
+  try {
+    const dir = path.join(CLIP_CACHE_DIR, String(targetId));
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const dest = path.join(dir, idx + '.mp4');
+    const upstream = await fetch(url, { headers: { 'User-Agent': 'memorial-clip-cache/1.0' } });
+    if (!upstream.ok) {
+      const t = await upstream.text().catch(() => '');
+      return res.status(502).json({ error: `upstream ${upstream.status}`, body: t.slice(0, 300) });
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    // Reject tiny bodies (Replicate returns 39-byte JSON "requested file not found"
+    // with HTTP 200 once the URL has expired — we don't want to save that as mp4).
+    const ct = upstream.headers.get('content-type') || '';
+    if (buf.length < 4096 || /json/i.test(ct)) {
+      return res.status(502).json({ error: 'upstream returned non-video body', bytes: buf.length, contentType: ct });
+    }
+    fs.writeFileSync(dest, buf);
+    console.log(`[clip-cache user=${req.user.username}] saved ${targetId}/${idx}.mp4 (${(buf.length/1024).toFixed(0)}KB)`);
+    res.json({ ok: true, url: `/clip-cache/${targetId}/${idx}.mp4`, bytes: buf.length });
+  } catch (e) {
+    console.error('[clip-cache save] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/clip-cache/:targetId/:filename', (req, res) => {
+  const { targetId, filename } = req.params;
+  if (!SAFE_ID.test(targetId) || !/^\d+\.mp4$/.test(filename)) return res.status(400).end();
+  if (denyIfNotOwned(req, res)) return;
+  const file = path.join(CLIP_CACHE_DIR, targetId, filename);
+  if (!fs.existsSync(file)) return res.status(404).end();
+  res.setHeader('Content-Type', 'video/mp4');
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  fs.createReadStream(file).pipe(res);
 });
 
 function runFfmpeg(args) {

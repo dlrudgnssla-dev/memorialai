@@ -6985,7 +6985,7 @@ async function _onbGenerateOneClip(idx){
     await persistPipelineState();
     return null;
   }
-  const direct = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
+  const direct = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, idx);
   const videoUrl = wrapKlingUrlForCanvas(direct);
   pipelineState.generatedClips[idx] = { videoUrl, simulated: false };
   await persistPipelineState();
@@ -7108,7 +7108,7 @@ async function _onbGenerateClips(){
     if (!startFrame || !endFrame) return;
     try {
       if (hasVideoProviderConfigured()){
-        const direct = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
+        const direct = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
         const videoUrl = wrapKlingUrlForCanvas(direct);
         pipelineState.generatedClips[i] = { videoUrl, simulated: false };
         done++;
@@ -12140,7 +12140,7 @@ async function uploadImageToProxy(proxyBase, dataUrl){
    Triggered when admin sets aiKeys.videoProvider === 'seedance'.
    Returns a video URL (string) so callers stay unchanged.
 ============================================================ */
-async function callSeedanceClip(startImg, endImg, prompt, duration){
+async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
   const token = aiKeys.seedance?.token;
   const model = (aiKeys.seedance?.model || 'bytedance/seedance-2.0').trim();
   const resolution = (aiKeys.seedance?.resolution || '480p').trim();
@@ -12223,10 +12223,41 @@ async function callSeedanceClip(startImg, endImg, prompt, duration){
   }
   // Output can be a string URL or an array of URLs
   const out = pred.output;
-  const videoUrl = Array.isArray(out) ? out[0] : (typeof out === 'string' ? out : null);
-  if (!videoUrl) throw new Error('Seedance 응답에 비디오 URL 없음');
-  console.log(`[Seedance] done → ${videoUrl}`);
-  return videoUrl;
+  const replicateUrl = Array.isArray(out) ? out[0] : (typeof out === 'string' ? out : null);
+  if (!replicateUrl) throw new Error('Seedance 응답에 비디오 URL 없음');
+  console.log(`[Seedance] done → ${replicateUrl}`);
+
+  // Replicate delivery URLs are TEMPORARY (expire in ~24h with a 200-OK
+  // JSON "requested file not found" body). Download immediately and host
+  // locally so reload-after-expiry doesn't leave the clip slot black.
+  // The clipIdx is passed in via a stash on this function call (set by
+  // the caller) — falls back to a timestamp if unavailable.
+  try {
+    const targetId = (typeof currentTarget !== 'undefined' && currentTarget) ||
+                     (typeof onbState !== 'undefined' && onbState?.targetId) || null;
+    if (targetId && Number.isFinite(clipIdx)){
+      const saveResp = await fetch('/clip-cache/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: replicateUrl, targetId, clipIdx })
+      });
+      if (saveResp.ok) {
+        const j = await saveResp.json();
+        if (j?.url) {
+          console.log(`[Seedance] cached locally → ${j.url} (${(j.bytes/1024).toFixed(0)}KB)`);
+          return j.url;          // permanent URL
+        }
+      } else {
+        const t = await saveResp.text().catch(()=>'');
+        console.warn(`[Seedance] cache save failed (${saveResp.status}): ${t.slice(0,200)} — falling back to temporary Replicate URL`);
+      }
+    } else {
+      console.warn('[Seedance] no targetId/clipIdx for cache save — using temporary Replicate URL (will expire ~24h)');
+    }
+  } catch(e){
+    console.warn('[Seedance] cache save threw, using temporary URL:', e.message);
+  }
+  return replicateUrl;
 }
 
 // Helper used by all clip-generation gates. Returns true if the
@@ -12245,19 +12276,21 @@ function selectedVideoProvider(){
   return aiKeys.videoProvider || 'kling';
 }
 
-async function callKlingClip(startImg, endImg, prompt, duration){
+async function callKlingClip(startImg, endImg, prompt, duration, clipIdx){
   // === Provider dispatch (added for multi-model support) ===
   // STRICT mode: never silently fall back to Kling. If admin selected
   // Seedance in 🤖 AI 설정 → 사용 모델 선택 we go to Seedance and stay
   // there even on error — propagate up so the user sees the real cause
   // (e.g. Replicate 402 Insufficient credit) instead of accidentally
   // burning a Kling call.
+  // clipIdx (optional) is used by callSeedanceClip to cache the result
+  // server-side so the Replicate temporary URL doesn't go black on reload.
   const provider = aiKeys.videoProvider || 'kling';
   if (provider === 'seedance') {
     if (!aiKeys.seedance?.token){
       throw new Error('영상 모델로 Seedance가 선택되어 있는데 Replicate 토큰이 비어있습니다. AI 설정에서 토큰을 입력하거나, 영상 모델을 클링으로 바꾸세요. (자동 전환되지 않습니다)');
     }
-    return callSeedanceClip(startImg, endImg, prompt, duration);
+    return callSeedanceClip(startImg, endImg, prompt, duration, clipIdx);
   }
   if (provider !== 'kling'){
     throw new Error(`알 수 없는 영상 모델 provider: "${provider}". AI 설정에서 '클링 v3' 또는 'Seedance 2.0'을 선택하세요.`);
@@ -12832,7 +12865,7 @@ async function regenerateOneClip(i){
   setProgItem('clipProgress', i, 'pending', clipPendingHtml(i, startFrame, endFrame));
   try {
     console.log(`[${_vp} clip ${i+1} regen] startFrame=프레임${c.first} (len ${startFrame.length}), endFrame=프레임${c.last} (len ${endFrame.length})`);
-    const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
+    const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
     const videoUrl = wrapKlingUrlForCanvas(directUrl);
     pipelineState.generatedClips[i] = { videoUrl, simulated:false };
     await persistPipelineState();
@@ -13017,7 +13050,7 @@ async function regenerateClipsBatch(){
     setProgItem('clipProgress', i, 'pending', clipPendingHtml(i, startFrame, endFrame));
     const _vpBatch = selectedVideoProvider();
     try {
-      const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
+      const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
       const videoUrl = wrapKlingUrlForCanvas(directUrl);
       pipelineState.generatedClips[i] = { videoUrl, simulated:false };
       await persistPipelineState();
@@ -13286,7 +13319,7 @@ async function _stageClips(){
       if(hasVideoProviderConfigured()){
         const vp = selectedVideoProvider();
         console.log(`[${vp} clip ${i+1}] startFrame=프레임${c.first} (len ${startFrame.length}), endFrame=프레임${c.last} (len ${endFrame.length}), prompt="${(c.prompt||'').slice(0,40)}"`);
-        const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
+        const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
         const videoUrl = wrapKlingUrlForCanvas(directUrl);
         pipelineState.generatedClips[i] = { videoUrl, simulated:false };
         persistPipelineState();
@@ -13573,7 +13606,7 @@ async function runPipeline(){
       try {
         if(hasVideoProviderConfigured()){
           const vp = selectedVideoProvider();
-          const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
+          const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
           const videoUrl = wrapKlingUrlForCanvas(directUrl);
           pipelineState.generatedClips[i] = { videoUrl, simulated:false };
           persistPipelineState();
@@ -14303,17 +14336,30 @@ function restorePipelineUI(){
       setProgItem('frameProgress', k, 'done', frameDoneHtml(+k, imgUrl));
     }
   }
-  // restore clip grid if any — use clipDoneHtml / clipFallbackHtml for ↻ button
-  const clipKeys = Object.keys(pipelineState.generatedClips);
-  if(clipKeys.length > 0){
+  // restore clip grid — iterate over the preset's clip definitions (not the
+  // state keys) so any clip-shaped hole in generatedClips renders as an
+  // empty regen slot instead of disappearing entirely. Replicate temporary
+  // URLs may also be dead by the time we get here; we still render them as
+  // a "done" slot — if the <video> fails to load, the ↻ 재생성 button is
+  // visible inside the same slot so the user can rebuild it on demand.
+  const _clipDefs = videoData[pipelineState.preset]?.clips || [];
+  if(_clipDefs.length > 0){
     $('#clipProgressBox').style.display = 'block';
     $('#clipProgress').innerHTML = '';
-    for(const k of clipKeys){
-      const c = pipelineState.generatedClips[k];
+    for(let k = 0; k < _clipDefs.length; k++){
+      const c = pipelineState.generatedClips?.[k];
+      const def = _clipDefs[k] || {};
+      const startFrame = pipelineState.generatedFrames?.[(def.first || (k+1)) - 1];
       if(c?.videoUrl){
-        setProgItem('clipProgress', k, 'done', clipDoneHtml(+k, c.videoUrl));
+        setProgItem('clipProgress', k, 'done', clipDoneHtml(k, c.videoUrl));
       } else if(c?.startFrame){
-        setProgItem('clipProgress', k, 'done', clipFallbackHtml(+k, c.startFrame));
+        setProgItem('clipProgress', k, 'done', clipFallbackHtml(k, c.startFrame));
+      } else if(startFrame){
+        // Slot exists in preset but never generated yet — show the start
+        // frame as a placeholder so the ↻ 재생성 button is reachable.
+        setProgItem('clipProgress', k, 'done', clipFallbackHtml(k, startFrame));
+      } else {
+        setProgItem('clipProgress', k, 'error', clipErrorHtml(k, '프레임 없음'));
       }
     }
   }
