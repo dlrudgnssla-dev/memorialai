@@ -12154,11 +12154,11 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
 
   const dInt = parseInt(duration) || 5;
 
-  // Discover the EXACT schema field names once per page load. Different
-  // platforms use different names for the end-frame ("last_image" vs
-  // "end_image" vs "image_last") and we've been guessing. Cache result on
-  // window so subsequent calls don't re-fetch.
-  if (!window._seedanceSchema){
+  // Discover the EXACT schema field names. Cache on window per model.
+  // (Cache key intentionally includes a version suffix so changes here
+  // bust the old cache without requiring users to hard-reload.)
+  const _schemaCacheKey = `_seedanceSchema_${model}_v3`;
+  if (!window[_schemaCacheKey]){
     try {
       const sr = await fetch(`/replicate-proxy/models/${model}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -12167,17 +12167,24 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
         const meta = await sr.json();
         const props = meta?.latest_version?.openapi_schema?.components?.schemas?.Input?.properties || {};
         const fields = Object.keys(props);
-        window._seedanceSchema = { fields, props };
-        console.log(`[Seedance schema] model=${model} input fields:`, fields);
-        // Highlight image-related fields specifically
-        const imageFields = fields.filter(f => /image|frame/i.test(f));
-        console.log(`[Seedance schema] image/frame fields:`, imageFields);
-        imageFields.forEach(f => console.log(`  - ${f}:`, props[f]));
+        window[_schemaCacheKey] = { fields, props };
+        console.log(`[Seedance schema] model=${model} ALL input fields:`, fields);
+        // Highlight everything that looks image/frame/strength/guidance related
+        const flagged = fields.filter(f => /image|frame|strength|guidance|scale|weight|seed|control/i.test(f));
+        console.log(`[Seedance schema] interesting fields:`, flagged);
+        flagged.forEach(f => {
+          const p = props[f] || {};
+          console.log(`  - ${f}:`, JSON.stringify({
+            type: p.type, default: p.default, description: p.description?.slice(0,120)
+          }));
+        });
       } else {
         console.warn('[Seedance schema] fetch failed:', sr.status, await sr.text().catch(()=>''));
       }
     } catch(e){ console.warn('[Seedance schema] error:', e.message); }
   }
+  // Reference cached schema for field-name lookups below.
+  window._seedanceSchema = window[_schemaCacheKey];
 
   // Pick the END-frame field name from the schema instead of hardcoding.
   // Order = preferred → fallback. Replicate sometimes renames between
