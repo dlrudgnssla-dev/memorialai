@@ -4533,6 +4533,28 @@
 
     <!-- ===== TAB: AI ===== -->
     <div class="stab-panel" id="stab-ai">
+
+      <!-- Provider selectors (NEW) -->
+      <div class="card-box ai-card">
+        <h3>🎛 사용 모델 선택</h3>
+        <p class="muted">각 단계마다 어떤 AI 모델을 사용할지 선택합니다. 기본값은 Gemini / Kling 으로, 변경하지 않으면 기존과 동일하게 동작합니다.</p>
+        <div class="field">
+          <label>이미지 생성 모델 (대표·프레임 이미지)</label>
+          <select id="ai-image-provider">
+            <option value="gemini">Gemini 2.5 Flash Image (Google · Nano Banana)</option>
+            <option value="openai">OpenAI Images 2.0 / gpt-image-2 (ChatGPT 이미지)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>동영상 생성 모델 (Kling 클립)</label>
+          <select id="ai-video-provider">
+            <option value="kling">Kling v3 (KuaiShou)</option>
+            <option value="seedance">Seedance v1 (ByteDance · via Replicate)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Existing Gemini settings — UNCHANGED -->
       <div class="card-box ai-card">
         <h3>Gemini</h3>
         <p class="muted">Google AI Studio에서 발급한 Gemini API 키를 입력합니다.</p>
@@ -4555,6 +4577,28 @@
         </div>
       </div>
 
+      <!-- NEW: OpenAI image -->
+      <div class="card-box ai-card">
+        <h3>OpenAI (Images 2.0)</h3>
+        <p class="muted">OpenAI Platform에서 발급한 API 키를 입력합니다. <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--accent)">→ 키 발급</a></p>
+        <div class="field">
+          <label>이미지 모델</label>
+          <input type="text" id="ai-openai-model" value="gpt-image-2" list="openai-models" />
+          <datalist id="openai-models">
+            <option value="gpt-image-2">ChatGPT Images 2.0 (최신 · 권장 · 2026.4 출시 · thinking 지원)</option>
+            <option value="gpt-image-1">GPT Image 1 (한 단계 옛 모델)</option>
+          </datalist>
+        </div>
+        <div class="field">
+          <label>API Key</label>
+          <div class="key-row">
+            <input type="password" id="ai-openai-key" placeholder="sk-..." />
+            <button class="btn ghost xs" onclick="toggleVisibility('ai-openai-key')">👁</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Existing Kling settings — UNCHANGED -->
       <div class="card-box ai-card">
         <h3>Kling</h3>
         <p class="muted">Kling AI 개발자 포털에서 발행된 API 키를 입력합니다.</p>
@@ -4578,6 +4622,27 @@
           <input type="text" id="ai-kling-proxy" placeholder="https://memorial-proxy.dlrudgnssla.workers.dev" />
           <div style="font-size:11px; color:var(--ink-soft); margin-top:4px">
             Cloudflare Workers + R2로 호스팅됩니다. 비워두면 기본값 자동 적용.
+          </div>
+        </div>
+      </div>
+
+      <!-- NEW: Seedance via Replicate -->
+      <div class="card-box ai-card">
+        <h3>Seedance (ByteDance · via Replicate)</h3>
+        <p class="muted">Replicate 토큰을 입력합니다. <a href="https://replicate.com/account/api-tokens" target="_blank" style="color:var(--accent)">→ 토큰 발급</a> 후 Seedance 모델 사용권 활성화</p>
+        <div class="field">
+          <label>Replicate 모델 (image-to-video)</label>
+          <input type="text" id="ai-seedance-model" value="bytedance/seedance-1-pro" list="seedance-models" />
+          <datalist id="seedance-models">
+            <option value="bytedance/seedance-1-pro">Seedance 1 Pro (권장)</option>
+            <option value="bytedance/seedance-1-lite">Seedance 1 Lite</option>
+          </datalist>
+        </div>
+        <div class="field">
+          <label>Replicate API Token</label>
+          <div class="key-row">
+            <input type="password" id="ai-seedance-token" placeholder="r8_..." />
+            <button class="btn ghost xs" onclick="toggleVisibility('ai-seedance-token')">👁</button>
           </div>
         </div>
       </div>
@@ -9744,6 +9809,20 @@ if (aiKeys.kling) {
   }
 }
 
+// One-shot migration: bump OpenAI model from gpt-image-1 → gpt-image-2
+// (ChatGPT Images 2.0, released 2026-04-21). Only runs once; if admin
+// later picks gpt-image-1 manually we leave it alone.
+const OPENAI_MODEL_VERSION = 2;
+if ((store.get('openaiModelVersion', 0) || 0) < OPENAI_MODEL_VERSION) {
+  aiKeys.openai = aiKeys.openai || {};
+  if (!aiKeys.openai.model || aiKeys.openai.model === 'gpt-image-1') {
+    aiKeys.openai.model = 'gpt-image-2';
+  }
+  store.set('aiKeys', aiKeys);
+  store.set('openaiModelVersion', OPENAI_MODEL_VERSION);
+  console.log('[init] OpenAI model migrated to gpt-image-2');
+}
+
 /* Default frame/clip prompts for each dog personality preset.
    Each entry: { frames: [3 strings], clips: [3 strings] }
    - frame 1: 정면 대표 자세 / frame 2: 측면·표정 변화 / frame 3: 행동·움직임
@@ -11320,25 +11399,39 @@ window.delBgm = async i =>{
 ============================================================ */
 function loadAiKeysUI(){
   const map = [
+    // Existing Gemini fields (unchanged)
     ['#ai-gemini-model', aiKeys.gemini?.model || 'gemini-2.5-flash-image-preview', v=>{aiKeys.gemini = aiKeys.gemini || {}; aiKeys.gemini.model = v;}],
     ['#ai-gemini-key',   aiKeys.gemini?.key   || '',                                v=>{aiKeys.gemini = aiKeys.gemini || {}; aiKeys.gemini.key = v;}],
+    // Existing Kling fields (unchanged)
     ['#ai-kling-model',  aiKeys.kling?.model  || 'kling-v2-pro',                    v=>{aiKeys.kling = aiKeys.kling || {}; aiKeys.kling.model = v;}],
     ['#ai-kling-access', aiKeys.kling?.access || '',                                v=>{aiKeys.kling = aiKeys.kling || {}; aiKeys.kling.access = v;}],
     ['#ai-kling-secret', aiKeys.kling?.secret || '',                                v=>{aiKeys.kling = aiKeys.kling || {}; aiKeys.kling.secret = v;}],
-    ['#ai-kling-proxy',  aiKeys.kling?.proxy  || 'https://memorial-proxy.dlrudgnssla.workers.dev',  v=>{aiKeys.kling = aiKeys.kling || {}; aiKeys.kling.proxy = v;}]
+    ['#ai-kling-proxy',  aiKeys.kling?.proxy  || 'https://memorial-proxy.dlrudgnssla.workers.dev',  v=>{aiKeys.kling = aiKeys.kling || {}; aiKeys.kling.proxy = v;}],
+    // NEW: provider selectors
+    ['#ai-image-provider', aiKeys.imageProvider || 'gemini', v=>{aiKeys.imageProvider = v;}],
+    ['#ai-video-provider', aiKeys.videoProvider || 'kling',  v=>{aiKeys.videoProvider = v;}],
+    // NEW: OpenAI fields (default = gpt-image-2, the 2026.4 ChatGPT Images 2.0)
+    ['#ai-openai-model', aiKeys.openai?.model || 'gpt-image-2', v=>{aiKeys.openai = aiKeys.openai || {}; aiKeys.openai.model = v;}],
+    ['#ai-openai-key',   aiKeys.openai?.key   || '',            v=>{aiKeys.openai = aiKeys.openai || {}; aiKeys.openai.key = v;}],
+    // NEW: Seedance via Replicate fields
+    ['#ai-seedance-model', aiKeys.seedance?.model || 'bytedance/seedance-1-pro', v=>{aiKeys.seedance = aiKeys.seedance || {}; aiKeys.seedance.model = v;}],
+    ['#ai-seedance-token', aiKeys.seedance?.token || '',                          v=>{aiKeys.seedance = aiKeys.seedance || {}; aiKeys.seedance.token = v;}]
   ];
   for(const [sel, val, setter] of map){
     const el = $(sel); if(!el) continue;
     el.value = val;
     let t;
-    el.oninput = ()=>{
+    const handler = () => {
       clearTimeout(t);
       t = setTimeout(()=>{
-        setter(el.value.trim());
+        setter(el.value.trim ? el.value.trim() : el.value);
         store.set('aiKeys', aiKeys);
         showSavedDot(el);
       }, 400);
     };
+    el.oninput = handler;
+    // <select> elements fire 'change' instead of 'input' on some browsers
+    if (el.tagName === 'SELECT') el.onchange = handler;
   }
 }
 window.toggleVisibility = id =>{
@@ -11347,12 +11440,26 @@ window.toggleVisibility = id =>{
 };
 window.saveAiKeys = ()=>{
   aiKeys = {
+    // Existing Gemini / Kling — UNCHANGED
     gemini:{ model: $('#ai-gemini-model').value.trim(), key: $('#ai-gemini-key').value.trim() },
     kling: {
       model:  $('#ai-kling-model').value.trim(),
       access: $('#ai-kling-access').value.trim(),
       secret: $('#ai-kling-secret').value.trim(),
       proxy:  $('#ai-kling-proxy').value.trim()
+    },
+    // NEW provider selectors (default keeps current behavior)
+    imageProvider: $('#ai-image-provider')?.value || 'gemini',
+    videoProvider: $('#ai-video-provider')?.value || 'kling',
+    // NEW OpenAI image (default = gpt-image-2)
+    openai: {
+      model: $('#ai-openai-model')?.value.trim() || 'gpt-image-2',
+      key:   $('#ai-openai-key')?.value.trim()   || ''
+    },
+    // NEW Seedance via Replicate
+    seedance: {
+      model: $('#ai-seedance-model')?.value.trim() || 'bytedance/seedance-1-pro',
+      token: $('#ai-seedance-token')?.value.trim() || ''
     }
   };
   store.set('aiKeys', aiKeys);
@@ -11594,7 +11701,124 @@ function wrapKlingUrlForCanvas(url){
   return url;
 }
 
+/* ============================================================
+   NEW MODEL: OpenAI Image API (default gpt-image-2 = ChatGPT Images 2.0,
+   released 2026-04-21). Falls back to gpt-image-1 if admin pins it.
+   Triggered when admin sets aiKeys.imageProvider === 'openai'.
+   Returns the same data-URL shape as callGeminiImage so callers
+   stay unchanged.
+============================================================ */
+async function callOpenAIImage(prompt, refImages, bgImage){
+  const key = aiKeys.openai?.key;
+  // Default = gpt-image-2 (ChatGPT Images 2.0, released 2026-04-21).
+  // gpt-image-1 is one generation older.
+  const model = aiKeys.openai?.model || 'gpt-image-2';
+  if (!key) throw new Error('OpenAI API 키가 설정되지 않았습니다');
+
+  // GPT Image 1 supports BOTH text-to-image (/v1/images/generations) and
+  // image-edit with references (/v1/images/edits). When we have ref
+  // photos we use the edit endpoint so identity is preserved.
+  const hasRefs = Array.isArray(refImages) && refImages.length > 0;
+  const composedPrompt = bgImage
+    ? `${prompt}\n\n[Background] Use the attached background image as the scene; place the subject naturally in it.`
+    : prompt;
+
+  if (hasRefs) {
+    // Image-edit endpoint with strong identity preservation prompt.
+    // GPT Image 1's edit mode can drift if the prompt doesn't explicitly
+    // tell it to preserve the subject — so we wrap with an English-first
+    // identity directive that gpt-image-1 follows much better.
+    const identityHook = `IMPORTANT: The attached photo(s) show the EXACT subject — keep the same breed, coat color and markings, eye color, body shape, and facial features. Recreate this exact same individual animal/person; do not substitute a different one. Only the pose, framing, and background may follow the additional instructions below.
+
+`;
+    const finalPrompt = identityHook + composedPrompt;
+
+    const form = new FormData();
+    form.append('model', model);
+    form.append('prompt', finalPrompt);
+    form.append('size', '1024x1024');
+    form.append('n', '1');
+    // Send up to 3 reference photos (more = more identity signal)
+    const refCount = Math.min(refImages.length, 3);
+    for (let i = 0; i < refCount; i++){
+      const r = await resizeDataUrl(refImages[i].dataUrl, 1024);
+      const b = await (await fetch(r)).blob();
+      // gpt-image-1 expects image[] for multi-image input
+      form.append('image[]', b, `ref${i+1}.png`);
+    }
+    const resp = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}` },
+      body: form
+    });
+    if (!resp.ok) {
+      const t = await resp.text();
+      throw new Error(`OpenAI edit ${resp.status}: ${t.slice(0, 200)}`);
+    }
+    const j = await resp.json();
+    const item = j?.data?.[0];
+    if (item?.b64_json) return `data:image/png;base64,${item.b64_json}`;
+    if (item?.url) {
+      const imgResp = await fetch(item.url);
+      const blob = await imgResp.blob();
+      return await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result);
+        reader.onerror = rej;
+        reader.readAsDataURL(blob);
+      });
+    }
+    throw new Error('OpenAI edit 응답에 이미지 데이터 없음');
+  } else {
+    // No refs → plain text-to-image.
+    // We NEVER pass `response_format` — gpt-image-1 rejects it, and for
+    // DALL-E we just handle whichever shape comes back (url or b64).
+    const body = {
+      model,
+      prompt: composedPrompt,
+      size: '1024x1024',
+      n: 1
+    };
+    const resp = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      const t = await resp.text();
+      throw new Error(`OpenAI gen ${resp.status}: ${t.slice(0, 200)}`);
+    }
+    const j = await resp.json();
+    const item = j?.data?.[0];
+    if (item?.b64_json) {
+      return `data:image/png;base64,${item.b64_json}`;
+    }
+    if (item?.url) {
+      // DALL-E may return a URL — fetch and convert to data URL so
+      // downstream callers (which expect data URLs) keep working.
+      const imgResp = await fetch(item.url);
+      const blob = await imgResp.blob();
+      return await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result);
+        reader.onerror = rej;
+        reader.readAsDataURL(blob);
+      });
+    }
+    throw new Error('OpenAI 응답에 이미지 데이터 없음');
+  }
+}
+
 async function callGeminiImage(prompt, refImages, bgImage){
+  // === Provider dispatch (added for multi-model support) ===
+  // If admin selected OpenAI in 🤖 AI 설정 → 사용 모델 선택, route there
+  // without touching any of the original Gemini logic below.
+  if (aiKeys.imageProvider === 'openai') {
+    return callOpenAIImage(prompt, refImages, bgImage);
+  }
   const key = aiKeys.gemini?.key;
   const model = aiKeys.gemini?.model || 'gemini-2.5-flash-image-preview';
   if(!key) throw new Error('Gemini API 키가 설정되지 않았습니다');
@@ -11773,7 +11997,91 @@ async function uploadImageToProxy(proxyBase, dataUrl){
   return j.url;
 }
 
+/* ============================================================
+   NEW MODEL: Seedance (ByteDance) via Replicate
+   Triggered when admin sets aiKeys.videoProvider === 'seedance'.
+   Returns a video URL (string) so callers stay unchanged.
+============================================================ */
+async function callSeedanceClip(startImg, endImg, prompt, duration){
+  const token = aiKeys.seedance?.token;
+  const model = (aiKeys.seedance?.model || 'bytedance/seedance-1-pro').trim();
+  if (!token) throw new Error('Replicate API Token이 설정되지 않았습니다');
+
+  // Same small-framing enforcement we use for Kling
+  if (prompt && !/줌인 금지|do not zoom in|stays small/i.test(prompt)){
+    prompt = (prompt.trim().replace(/[.,\s]+$/, '')) +
+      ', 카메라 줌인 금지, 피사체는 화면 가운데 55% 이하로 작게 유지, 모든 움직임은 충분한 여백 안쪽에서만 발생, do not zoom in, subject stays small within frame';
+  }
+
+  // Replicate accepts image input as a data-URL string directly.
+  // We feed the start frame; if Seedance supports end-frame guidance
+  // we also pass it. (Defaults to start-only when unsupported.)
+  const dInt = parseInt(duration) || 5;
+
+  console.log(`[Seedance] start prediction model=${model} duration=${dInt}s`);
+  const createResp = await fetch('https://api.replicate.com/v1/predictions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'wait'   // long-poll up to 60s before falling back to async
+    },
+    body: JSON.stringify({
+      model,                       // e.g. "bytedance/seedance-1-pro"
+      input: {
+        image: startImg,           // data URL or remote URL
+        prompt: prompt || '',
+        duration: dInt,
+        aspect_ratio: '1:1',
+        // last_frame is supported by some Seedance variants — harmless
+        // to include; if not supported the API ignores unknown fields.
+        last_frame: endImg
+      }
+    })
+  });
+
+  if (!createResp.ok) {
+    const t = await createResp.text();
+    throw new Error(`Replicate create ${createResp.status}: ${t.slice(0, 200)}`);
+  }
+  let pred = await createResp.json();
+
+  // Poll until terminal status
+  const startTs = Date.now();
+  const TIMEOUT_MS = 8 * 60 * 1000; // 8 min
+  while (pred.status === 'starting' || pred.status === 'processing') {
+    if (Date.now() - startTs > TIMEOUT_MS) {
+      throw new Error('Seedance 생성 시간 초과 (8분)');
+    }
+    await new Promise(r => setTimeout(r, 4000));
+    const p = await fetch(`https://api.replicate.com/v1/predictions/${pred.id}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!p.ok) {
+      const t = await p.text();
+      throw new Error(`Replicate poll ${p.status}: ${t.slice(0, 200)}`);
+    }
+    pred = await p.json();
+    console.log(`[Seedance] status=${pred.status}`);
+  }
+  if (pred.status !== 'succeeded') {
+    throw new Error(`Seedance ${pred.status}: ${pred.error || 'unknown'}`);
+  }
+  // Output can be a string URL or an array of URLs
+  const out = pred.output;
+  const videoUrl = Array.isArray(out) ? out[0] : (typeof out === 'string' ? out : null);
+  if (!videoUrl) throw new Error('Seedance 응답에 비디오 URL 없음');
+  console.log(`[Seedance] done → ${videoUrl}`);
+  return videoUrl;
+}
+
 async function callKlingClip(startImg, endImg, prompt, duration){
+  // === Provider dispatch (added for multi-model support) ===
+  // If admin selected Seedance in 🤖 AI 설정 → 사용 모델 선택, route there
+  // without touching any of the original Kling logic below.
+  if (aiKeys.videoProvider === 'seedance') {
+    return callSeedanceClip(startImg, endImg, prompt, duration);
+  }
   const access = aiKeys.kling?.access;
   const secret = aiKeys.kling?.secret;
   const rawModel  = (aiKeys.kling?.model || 'kling-v1').trim();
