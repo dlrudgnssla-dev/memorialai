@@ -6978,8 +6978,9 @@ async function _onbGenerateOneClip(idx){
   const startFrame = pipelineState.generatedFrames[c.first - 1];
   const endFrame   = pipelineState.generatedFrames[c.last  - 1];
   if (!startFrame || !endFrame) throw new Error('해당 클립에 필요한 프레임이 없습니다');
-  if (!aiKeys.kling?.access || !aiKeys.kling?.secret){
-    // Fall back to simulation clip (still useful as placeholder)
+  if (!hasVideoProviderConfigured()){
+    // Selected provider's credentials missing → simulation placeholder.
+    // We do NOT switch providers here.
     pipelineState.generatedClips[idx] = { startFrame, endFrame, dur: c.dur, simulated: true };
     await persistPipelineState();
     return null;
@@ -7077,8 +7078,8 @@ async function _onbRegenerateSelectedClips(){
 }
 
 async function _onbGenerateClips(){
-  if (!aiKeys.kling?.access || !aiKeys.kling?.secret){
-    _onbSetMakeStatus('Kling 키가 설정되지 않아 시뮬레이션 클립으로 진행합니다.');
+  if (!hasVideoProviderConfigured()){
+    _onbSetMakeStatus(`${selectedVideoProvider()} 키가 설정되지 않아 시뮬레이션 클립으로 진행합니다.`);
   }
   const preset = pipelineState.preset;
   ensurePresetData(preset);
@@ -7106,12 +7107,12 @@ async function _onbGenerateClips(){
     const endFrame   = pipelineState.generatedFrames[c.last  - 1];
     if (!startFrame || !endFrame) return;
     try {
-      if (aiKeys.kling?.access && aiKeys.kling?.secret){
+      if (hasVideoProviderConfigured()){
         const direct = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
         const videoUrl = wrapKlingUrlForCanvas(direct);
         pipelineState.generatedClips[i] = { videoUrl, simulated: false };
         done++;
-        _onbSetMakeStatus(`클립 ${done} / ${clips.length} · 병렬 생성 중`);
+        _onbSetMakeStatus(`클립 ${done} / ${clips.length} · 병렬 생성 중 (${selectedVideoProvider()})`);
       } else {
         pipelineState.generatedClips[i] = { startFrame, endFrame, dur: c.dur, simulated: true };
         done++;
@@ -12224,12 +12225,38 @@ async function callSeedanceClip(startImg, endImg, prompt, duration){
   return videoUrl;
 }
 
+// Helper used by all clip-generation gates. Returns true if the
+// currently-selected video provider has its required credentials.
+// This replaces the older hardcoded `aiKeys.kling?.access && aiKeys.kling?.secret`
+// check, which would falsely reject Seedance-only setups (no Kling keys).
+// IMPORTANT: this never falls back across providers — if Seedance is
+// selected, ONLY its token is considered.
+function hasVideoProviderConfigured(){
+  const provider = aiKeys.videoProvider || 'kling';
+  if (provider === 'seedance') return !!aiKeys.seedance?.token;
+  if (provider === 'kling')    return !!(aiKeys.kling?.access && aiKeys.kling?.secret);
+  return false;
+}
+function selectedVideoProvider(){
+  return aiKeys.videoProvider || 'kling';
+}
+
 async function callKlingClip(startImg, endImg, prompt, duration){
   // === Provider dispatch (added for multi-model support) ===
-  // If admin selected Seedance in 🤖 AI 설정 → 사용 모델 선택, route there
-  // without touching any of the original Kling logic below.
-  if (aiKeys.videoProvider === 'seedance') {
+  // STRICT mode: never silently fall back to Kling. If admin selected
+  // Seedance in 🤖 AI 설정 → 사용 모델 선택 we go to Seedance and stay
+  // there even on error — propagate up so the user sees the real cause
+  // (e.g. Replicate 402 Insufficient credit) instead of accidentally
+  // burning a Kling call.
+  const provider = aiKeys.videoProvider || 'kling';
+  if (provider === 'seedance') {
+    if (!aiKeys.seedance?.token){
+      throw new Error('영상 모델로 Seedance가 선택되어 있는데 Replicate 토큰이 비어있습니다. AI 설정에서 토큰을 입력하거나, 영상 모델을 클링으로 바꾸세요. (자동 전환되지 않습니다)');
+    }
     return callSeedanceClip(startImg, endImg, prompt, duration);
+  }
+  if (provider !== 'kling'){
+    throw new Error(`알 수 없는 영상 모델 provider: "${provider}". AI 설정에서 '클링 v3' 또는 'Seedance 2.0'을 선택하세요.`);
   }
   const access = aiKeys.kling?.access;
   const secret = aiKeys.kling?.secret;
@@ -12791,27 +12818,30 @@ async function regenerateOneClip(i){
     alert(`클립 ${i+1}에 필요한 프레임이 없습니다 (시작: 프레임 ${c.first}, 끝: 프레임 ${c.last}).\n먼저 해당 프레임을 만드세요.`);
     return;
   }
-  if(!aiKeys.kling?.access || !aiKeys.kling?.secret){
-    alert('Kling 키가 설정되지 않았습니다.');
+  if(!hasVideoProviderConfigured()){
+    alert(`${selectedVideoProvider()} 키가 설정되지 않았습니다. AI 설정에서 키를 입력하거나 다른 영상 모델을 선택하세요. (자동 전환되지 않습니다)`);
     return;
   }
-  if(!confirm(`클립 ${i+1}만 다시 생성합니다.\n프레임 ${c.first} → 프레임 ${c.last} (${c.dur || '10초'})\n\n⚠ Kling API 비용이 발생합니다. 계속할까요?`)) return;
+  const _vp = selectedVideoProvider();
+  if(!confirm(`클립 ${i+1}만 다시 생성합니다.\n프레임 ${c.first} → 프레임 ${c.last} (${c.dur || '10초'})\n\n⚠ ${_vp.toUpperCase()} API 비용이 발생합니다. 계속할까요?`)) return;
 
   setProgItem('clipProgress', i, 'pending', clipPendingHtml(i, startFrame, endFrame));
   try {
-    console.log(`[Kling clip ${i+1} regen] startFrame=프레임${c.first} (len ${startFrame.length}), endFrame=프레임${c.last} (len ${endFrame.length})`);
+    console.log(`[${_vp} clip ${i+1} regen] startFrame=프레임${c.first} (len ${startFrame.length}), endFrame=프레임${c.last} (len ${endFrame.length})`);
     const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
     const videoUrl = wrapKlingUrlForCanvas(directUrl);
     pipelineState.generatedClips[i] = { videoUrl, simulated:false };
     await persistPipelineState();
     setProgItem('clipProgress', i, 'done', clipDoneHtml(i, videoUrl));
-    if(typeof prog !== 'undefined') prog.log(`✓ 클립 ${i+1} 재생성 완료 (Kling)`, 'ok');
+    if(typeof prog !== 'undefined') prog.log(`✓ 클립 ${i+1} 재생성 완료 (${_vp})`, 'ok');
   } catch(err){
     console.warn('Clip regen', i, err);
     pipelineState.generatedClips[i] = { startFrame, endFrame, dur:c.dur, simulated:true };
     await persistPipelineState();
     setProgItem('clipProgress', i, 'done', clipFallbackHtml(i, startFrame));
-    if(typeof prog !== 'undefined') prog.log(`⚠ 클립 ${i+1} 재생성 실패 → 시뮬레이션으로 대체 (${(err.message||'').slice(0,60)})`, 'warn');
+    // NOTE: "시뮬레이션 대체" means we show a still frame in place of the video.
+    // It does NOT mean we silently tried another provider — provider stays as configured.
+    if(typeof prog !== 'undefined') prog.log(`⚠ 클립 ${i+1} 재생성 실패 (${_vp}) → 정지 프레임으로 표시 (${(err.message||'').slice(0,60)})`, 'warn');
   }
 }
 window.regenerateOneClip = regenerateOneClip;
@@ -12963,11 +12993,11 @@ async function regenerateClipsBatch(){
     alert(`클립 ${missing.join(', ')} 은(는) 필요한 프레임이 없어 건너뜁니다. 먼저 해당 프레임을 만드세요.`);
   }
   if(valid.length === 0) return;
-  if(!aiKeys.kling?.access || !aiKeys.kling?.secret){
-    alert('Kling 키가 설정되지 않았습니다.');
+  if(!hasVideoProviderConfigured()){
+    alert(`${selectedVideoProvider()} 키가 설정되지 않았습니다. AI 설정에서 키를 입력하거나 다른 영상 모델을 선택하세요. (자동 전환되지 않습니다)`);
     return;
   }
-  if(!confirm(`클립 ${valid.map(i=>i+1).join(', ')} 을(를) 한 번에 재생성합니다.\nKling API 비용이 발생합니다. 계속할까요?`)) return;
+  if(!confirm(`클립 ${valid.map(i=>i+1).join(', ')} 을(를) 한 번에 재생성합니다.\n${selectedVideoProvider().toUpperCase()} API 비용이 발생합니다. 계속할까요?`)) return;
 
   const btn = document.getElementById('clipBatchRegenBtn');
   if(btn){ btn.disabled = true; btn.textContent = `재생성 중… (0/${valid.length})`; }
@@ -12981,19 +13011,21 @@ async function regenerateClipsBatch(){
     const startFrame = pipelineState.generatedFrames?.[c.first-1];
     const endFrame   = pipelineState.generatedFrames?.[c.last-1];
     setProgItem('clipProgress', i, 'pending', clipPendingHtml(i, startFrame, endFrame));
+    const _vpBatch = selectedVideoProvider();
     try {
       const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
       const videoUrl = wrapKlingUrlForCanvas(directUrl);
       pipelineState.generatedClips[i] = { videoUrl, simulated:false };
       await persistPipelineState();
       setProgItem('clipProgress', i, 'done', clipDoneHtml(i, videoUrl));
-      if(typeof prog !== 'undefined') prog.log(`✓ 클립 ${i+1} 일괄 재생성 완료 (Kling)`, 'ok');
+      if(typeof prog !== 'undefined') prog.log(`✓ 클립 ${i+1} 일괄 재생성 완료 (${_vpBatch})`, 'ok');
     } catch(err){
       console.warn('Clip batch regen', i, err);
       pipelineState.generatedClips[i] = { startFrame, endFrame, dur:c.dur, simulated:true };
       await persistPipelineState();
       setProgItem('clipProgress', i, 'done', clipFallbackHtml(i, startFrame));
-      if(typeof prog !== 'undefined') prog.log(`⚠ 클립 ${i+1} 일괄 재생성 실패 → 시뮬레이션 (${(err.message||'').slice(0,60)})`, 'warn');
+      // NOTE: simulated:true here = display still frame; provider is NOT switched.
+      if(typeof prog !== 'undefined') prog.log(`⚠ 클립 ${i+1} 일괄 재생성 실패 (${_vpBatch}) → 정지 프레임 표시 (${(err.message||'').slice(0,60)})`, 'warn');
     }
   }
   async function worker(){
@@ -13247,16 +13279,17 @@ async function _stageClips(){
     const startFrame = pipelineState.generatedFrames[c.first-1];
     const endFrame   = pipelineState.generatedFrames[c.last-1];
     try {
-      if(aiKeys.kling?.access && aiKeys.kling?.secret){
-        console.log(`[Kling clip ${i+1}] startFrame=프레임${c.first} (len ${startFrame.length}), endFrame=프레임${c.last} (len ${endFrame.length}), prompt="${(c.prompt||'').slice(0,40)}"`);
+      if(hasVideoProviderConfigured()){
+        const vp = selectedVideoProvider();
+        console.log(`[${vp} clip ${i+1}] startFrame=프레임${c.first} (len ${startFrame.length}), endFrame=프레임${c.last} (len ${endFrame.length}), prompt="${(c.prompt||'').slice(0,40)}"`);
         const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
         const videoUrl = wrapKlingUrlForCanvas(directUrl);
         pipelineState.generatedClips[i] = { videoUrl, simulated:false };
         persistPipelineState();
-        prog.log(`✓ 클립 ${i+1} 완성 (Kling)`, 'ok');
+        prog.log(`✓ 클립 ${i+1} 완성 (${vp})`, 'ok');
         setProgItem('clipProgress', i, 'done', clipDoneHtml(i, videoUrl));
       } else {
-        throw new Error('Kling 키 미설정');
+        throw new Error(`${selectedVideoProvider()} 키 미설정`);
       }
     } catch(err){
       console.warn('Clip', i, 'fallback:', err.message);
@@ -13534,17 +13567,18 @@ async function runPipeline(){
       const startFrame = pipelineState.generatedFrames[c.first-1];
       const endFrame   = pipelineState.generatedFrames[c.last-1];
       try {
-        if(aiKeys.kling?.access && aiKeys.kling?.secret){
+        if(hasVideoProviderConfigured()){
+          const vp = selectedVideoProvider();
           const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
           const videoUrl = wrapKlingUrlForCanvas(directUrl);
           pipelineState.generatedClips[i] = { videoUrl, simulated:false };
           persistPipelineState();
-          prog.log(`✓ 클립 ${i+1} 완성 (Kling)`, 'ok');
+          prog.log(`✓ 클립 ${i+1} 완성 (${vp})`, 'ok');
           setProgItem('clipProgress', i, 'done',
             `<div class="preview"><video src="${videoUrl}" muted autoplay loop></video></div>
              <div class="overlay"><div class="lbl">클립 ${i+1}</div></div>`);
         } else {
-          throw new Error('Kling 키 미설정');
+          throw new Error(`${selectedVideoProvider()} 키 미설정`);
         }
       } catch(err){
         console.warn('Clip', i, 'fallback:', err.message);
