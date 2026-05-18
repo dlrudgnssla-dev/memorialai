@@ -409,6 +409,10 @@ app.get('/__logout__', (_req, res) => {
 app.use((req, res, next) => {
   if (req.path === '/health' || req.path === '/__logout__' ||
       req.path === '/go'     || req.path === '/login') return next();
+  // Public image hosting — Replicate (and others) need to fetch these
+  // without our cookie. The filenames are random hex so nobody can
+  // discover other users' images.
+  if (req.method === 'GET' && req.path.startsWith('/img-cache/')) return next();
 
   let user, pass;
 
@@ -522,6 +526,7 @@ app.get('/health', (_req, res) => {
 // to Replicate using the client-supplied Authorization header (the
 // admin's r8_... token). We never read or persist that token here.
 // ============================================================
+// Generic predictions endpoint (community models — uses `version`)
 app.post('/replicate-proxy/predictions', express.json({ limit: '50mb' }), async (req, res) => {
   const auth = req.headers.authorization;
   if (!auth || !/^Bearer\s+r8_/i.test(auth)) {
@@ -543,6 +548,78 @@ app.post('/replicate-proxy/predictions', express.json({ limit: '50mb' }), async 
        .send(text);
   } catch (e) {
     console.error('[replicate-proxy POST] error:', e.message);
+    res.status(502).json({ error: 'upstream fetch failed: ' + e.message });
+  }
+});
+
+// Official models endpoint — used for Seedance 2.0, Flux, etc.
+// POST /replicate-proxy/models/{owner}/{name}/predictions
+// Forwards to https://api.replicate.com/v1/models/{owner}/{name}/predictions
+app.post('/replicate-proxy/models/:owner/:name/predictions',
+  express.json({ limit: '50mb' }),
+  async (req, res) => {
+    const auth = req.headers.authorization;
+    if (!auth || !/^Bearer\s+r8_/i.test(auth)) {
+      return res.status(400).json({ error: 'Authorization header (Bearer r8_...) missing or invalid' });
+    }
+    const { owner, name } = req.params;
+    if (!/^[A-Za-z0-9._-]+$/.test(owner) || !/^[A-Za-z0-9._-]+$/.test(name)) {
+      return res.status(400).json({ error: 'bad owner/name' });
+    }
+    try {
+      const upstream = `https://api.replicate.com/v1/models/${owner}/${name}/predictions`;
+      const r = await fetch(upstream, {
+        method: 'POST',
+        headers: {
+          'Authorization': auth,
+          'Content-Type': 'application/json',
+          'Prefer': req.headers['prefer'] || 'wait'
+        },
+        body: JSON.stringify(req.body || {})
+      });
+      const text = await r.text();
+      res.status(r.status)
+         .set('Content-Type', r.headers.get('content-type') || 'application/json')
+         .send(text);
+    } catch (e) {
+      console.error('[replicate-proxy model POST] error:', e.message);
+      res.status(502).json({ error: 'upstream fetch failed: ' + e.message });
+    }
+  });
+
+// GET /replicate-proxy/models/{owner}/{name}
+// Returns the model object including openapi_schema (input field names + types).
+// Used for runtime schema discovery — we don't want to hardcode field names
+// because providers like Replicate / fal.ai / WaveSpeed each use different
+// names for the same Seedance feature (e.g. "last_image" vs "end_image_url").
+app.get('/replicate-proxy/models/:owner/:name', async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth || !/^Bearer\s+r8_/i.test(auth)) {
+    return res.status(400).json({ error: 'Authorization header (Bearer r8_...) missing or invalid' });
+  }
+  const { owner, name } = req.params;
+  if (!/^[A-Za-z0-9._-]+$/.test(owner) || !/^[A-Za-z0-9._-]+$/.test(name)) {
+    return res.status(400).json({ error: 'bad owner/name' });
+  }
+  try {
+    const r = await fetch(`https://api.replicate.com/v1/models/${owner}/${name}`, {
+      headers: { 'Authorization': auth }
+    });
+    const text = await r.text();
+    // Stash the schema to disk for local inspection — helps debug "why isn't
+    // last_image being honored?" by exposing strength / guidance parameters.
+    // Token is NOT stored. Path is debug-only, not served publicly.
+    if (r.ok) {
+      try {
+        const dbgFile = path.join(DATA_DIR, `_dbg-model-${owner}-${name}.json`);
+        fs.writeFileSync(dbgFile, text);
+      } catch(_){}
+    }
+    res.status(r.status)
+       .set('Content-Type', r.headers.get('content-type') || 'application/json')
+       .send(text);
+  } catch (e) {
+    console.error('[replicate-proxy model GET] error:', e.message);
     res.status(502).json({ error: 'upstream fetch failed: ' + e.message });
   }
 });
@@ -797,7 +874,17 @@ app.post('/backup', (req, res) => {
 // ============================================================
 const PIPE_DIR  = path.join(DATA_DIR, 'pipes');
 const VIDEO_DIR = path.join(DATA_DIR, 'videos');
-[PIPE_DIR, VIDEO_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+// Clip cache — permanent local copies of provider-generated clips
+// (Replicate / Kling temporary CDN URLs expire). One subdir per target.
+const CLIP_CACHE_DIR = path.join(DATA_DIR, 'clip-cache');
+// Image cache — public URL hosting for frame images.
+// Why: Replicate's image-input fields are declared `format: "uri"` in the
+// model schema. They prefer HTTPS URLs over inline base64 data URIs.
+// In particular, Seedance 2.0's `last_frame_image` field silently fails
+// to be honored when sent as a large data URI — same symptom we hit with
+// Kling, fixed there by upload-then-URL. Now applied to Seedance too.
+const IMG_CACHE_DIR = path.join(DATA_DIR, 'img-cache');
+[PIPE_DIR, VIDEO_DIR, CLIP_CACHE_DIR, IMG_CACHE_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 const SAFE_ID = /^[A-Za-z0-9_.-]+$/;
 
 // Helper: members can only touch backups for targets they own
@@ -914,6 +1001,136 @@ app.delete('/video-backup/:targetId', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ============================================================
+// Clip cache — save remote provider clips to local disk so the
+// generated video survives Replicate / Kling CDN URL expiry.
+//
+//   POST /clip-cache/save   body { url, targetId, clipIdx }
+//     → downloads url, writes to data/clip-cache/<targetId>/<clipIdx>.mp4
+//     → returns { url: '/clip-cache/<targetId>/<clipIdx>.mp4', bytes }
+//
+//   GET  /clip-cache/:targetId/:filename  (auth + owner-only)
+//     → serves the saved mp4
+// ============================================================
+app.post('/clip-cache/save', express.json({ limit: '1mb' }), async (req, res) => {
+  const { url, targetId, clipIdx } = req.body || {};
+  if (!url || !/^https?:\/\//i.test(url)) return res.status(400).json({ error: 'url required (http/https)' });
+  if (!targetId || !SAFE_ID.test(String(targetId))) return res.status(400).json({ error: 'bad targetId' });
+  const idx = Number.parseInt(clipIdx, 10);
+  if (!Number.isFinite(idx) || idx < 0 || idx > 999) return res.status(400).json({ error: 'bad clipIdx' });
+  // denyIfNotOwned reads req.params.targetId; on this POST route we get it
+  // from the body, so plant it into params for the shared check.
+  req.params = req.params || {};
+  req.params.targetId = String(targetId);
+  if (denyIfNotOwned(req, res)) return;
+
+  try {
+    const dir = path.join(CLIP_CACHE_DIR, String(targetId));
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const dest = path.join(dir, idx + '.mp4');
+    const upstream = await fetch(url, { headers: { 'User-Agent': 'memorial-clip-cache/1.0' } });
+    if (!upstream.ok) {
+      const t = await upstream.text().catch(() => '');
+      return res.status(502).json({ error: `upstream ${upstream.status}`, body: t.slice(0, 300) });
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    // Reject tiny bodies (Replicate returns 39-byte JSON "requested file not found"
+    // with HTTP 200 once the URL has expired — we don't want to save that as mp4).
+    const ct = upstream.headers.get('content-type') || '';
+    if (buf.length < 4096 || /json/i.test(ct)) {
+      return res.status(502).json({ error: 'upstream returned non-video body', bytes: buf.length, contentType: ct });
+    }
+    fs.writeFileSync(dest, buf);
+    console.log(`[clip-cache user=${req.user.username}] saved ${targetId}/${idx}.mp4 (${(buf.length/1024).toFixed(0)}KB)`);
+    res.json({ ok: true, url: `/clip-cache/${targetId}/${idx}.mp4`, bytes: buf.length });
+  } catch (e) {
+    console.error('[clip-cache save] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/clip-cache/:targetId/:filename', (req, res) => {
+  const { targetId, filename } = req.params;
+  if (!SAFE_ID.test(targetId) || !/^\d+\.mp4$/.test(filename)) return res.status(400).end();
+  if (denyIfNotOwned(req, res)) return;
+  const file = path.join(CLIP_CACHE_DIR, targetId, filename);
+  if (!fs.existsSync(file)) return res.status(404).end();
+  // CACHE STRATEGY: must-revalidate + ETag-from-mtime/size.
+  // The previous max-age=86400 made the browser reuse old mp4 bytes for
+  // 24h after regen, so users saw their OLD video even after a new one was
+  // cached server-side. Now: 304 when content hash (mtime+size) matches,
+  // full body when it changed. Cheap because the file is on local disk.
+  try {
+    const st = fs.statSync(file);
+    const etag = `W/"${st.size}-${st.mtimeMs.toString(36)}"`;
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, no-cache, must-revalidate');
+    res.setHeader('Last-Modified', new Date(st.mtimeMs).toUTCString());
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+  } catch(_){}
+  res.setHeader('Content-Type', 'video/mp4');
+  fs.createReadStream(file).pipe(res);
+});
+
+// ============================================================
+// Image cache — public URL hosting for frame images.
+//
+// POST /img-cache/upload   body { base64, ext, label? }
+//   → writes data/img-cache/<random>.<ext> and returns
+//     { url: '<host>/img-cache/<random>.<ext>' }
+//   The returned URL is publicly accessible (no auth on GET) so
+//   Replicate's worker can fetch it during prediction. We MUST NOT
+//   require auth on the GET — Replicate doesn't carry our cookie.
+//
+// GET  /img-cache/:filename  public, mp4-style streaming
+//
+// Lifetime: each upload gets a fresh random filename. Old files
+// accumulate; cleanup is manual (data/img-cache is git-ignored).
+// ============================================================
+app.post('/img-cache/upload', express.json({ limit: '50mb' }), (req, res) => {
+  const { base64, ext, label } = req.body || {};
+  if (!base64 || typeof base64 !== 'string') return res.status(400).json({ error: 'base64 required' });
+  const safeExt = (ext || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'jpg';
+  if (!/^(jpg|jpeg|png|webp)$/.test(safeExt)) return res.status(400).json({ error: 'bad ext' });
+  // Strip a leading data: prefix if present
+  const b64 = base64.replace(/^data:[^;]+;base64,/, '');
+  let buf;
+  try { buf = Buffer.from(b64, 'base64'); } catch (e) { return res.status(400).json({ error: 'bad base64' }); }
+  if (buf.length < 100) return res.status(400).json({ error: 'too small' });
+  if (buf.length > 20 * 1024 * 1024) return res.status(400).json({ error: 'too large (>20MB)' });
+  // Random filename — no need to make it predictable; we just need it
+  // unique and unguessable enough that nobody scrapes the directory.
+  const rand = require('crypto').randomBytes(9).toString('hex');
+  const fname = `${rand}.${safeExt === 'jpeg' ? 'jpg' : safeExt}`;
+  try {
+    fs.writeFileSync(path.join(IMG_CACHE_DIR, fname), buf);
+    // Build the public URL using the request's host (works behind
+    // Cloudflare tunnel — req.get('host') returns "memorialai.org").
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host  = req.headers['x-forwarded-host'] || req.get('host');
+    const url = `${proto}://${host}/img-cache/${fname}`;
+    console.log(`[img-cache user=${req.user.username}] saved ${fname} (${(buf.length/1024).toFixed(0)}KB) ${label ? '['+label+']' : ''}`);
+    res.json({ ok: true, url, filename: fname, bytes: buf.length });
+  } catch (e) {
+    console.error('[img-cache upload] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Public GET for the image — no auth gate (Replicate must be able to fetch it).
+// The auth middleware at the top of the file blocks /img-cache/* under its
+// generic rule; we whitelist this route shape there explicitly.
+app.get('/img-cache/:filename', (req, res) => {
+  const { filename } = req.params;
+  if (!/^[a-f0-9]{18}\.(jpg|png|webp)$/.test(filename)) return res.status(400).end();
+  const file = path.join(IMG_CACHE_DIR, filename);
+  if (!fs.existsSync(file)) return res.status(404).end();
+  const ext = filename.split('.').pop();
+  res.setHeader('Content-Type', ext === 'png' ? 'image/png' : (ext === 'webp' ? 'image/webp' : 'image/jpeg'));
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  fs.createReadStream(file).pipe(res);
+});
+
 function runFfmpeg(args) {
   return new Promise((resolve, reject) => {
     const ff = spawn(FFMPEG, args);
@@ -927,6 +1144,27 @@ function runFfmpeg(args) {
 }
 
 async function downloadTo(url, dest) {
+  // Local clip-cache URLs (saved Seedance clips) are RELATIVE paths like
+  // /clip-cache/<targetId>/<idx>.mp4. fetch() can't handle relative URLs in
+  // Node — and we don't need an HTTP round-trip anyway since the bytes are
+  // already on local disk. Copy directly instead. Old absolute URLs
+  // (kling-proxy.workers.dev, replicate.delivery, etc.) still go through fetch.
+  if (typeof url === 'string' && url.startsWith('/clip-cache/')) {
+    // Strip query string if present (e.g. ?v=timestamp cache-buster)
+    const cleanPath = url.split('?')[0];
+    // /clip-cache/<targetId>/<filename>
+    const m = cleanPath.match(/^\/clip-cache\/([^/]+)\/(.+)$/);
+    if (m && SAFE_ID.test(m[1]) && /^\d+\.mp4$/.test(m[2])) {
+      const src = path.join(CLIP_CACHE_DIR, m[1], m[2]);
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, dest);
+        const sz = fs.statSync(dest).size;
+        return sz;
+      }
+      throw new Error(`local clip not found: ${src}`);
+    }
+    throw new Error(`bad clip-cache path: ${url}`);
+  }
   const r = await fetch(url, { headers: { 'User-Agent': 'compose-server/1.0' } });
   if (!r.ok) throw new Error(`fetch ${url} → ${r.status}`);
   const buf = Buffer.from(await r.arrayBuffer());

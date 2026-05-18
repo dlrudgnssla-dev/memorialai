@@ -3,7 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="build" content="97ae823-uniform-cells" />
 <title>MEMORIAL · Cinematic AI Tribute Videos</title>
+<script>
+  // Build marker — printed on every page load so we can verify in the
+  // browser console whether the user has the latest code or a cached
+  // version. If you see this comment but no log, the page is stale.
+  console.log('%c[MEMORIAL] build=97ae823-uniform-cells', 'color:#caa260;font-weight:600;background:#1a0f00;padding:2px 6px;border-radius:4px');
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Nanum+Myeongjo:wght@400;700&display=swap" rel="stylesheet">
@@ -1197,6 +1204,94 @@
   .member-bgm-zone .ic { font-size: 38px; margin-bottom: 8px; }
   .member-bgm-zone .t { font-size: 14px; color: #f0e8ff; margin-bottom: 4px; }
   .member-bgm-zone .s { font-size: 12px; color: rgba(200, 190, 255, 0.55); }
+  /* BGM playlist mode selector (radio row) */
+  .bgm-modes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: center;
+  }
+  .bgm-modes label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .bgm-modes input[type="radio"] { accent-color: #caa260; }
+
+  /* Normal-mode sizing for the result player wrapper + video frame.
+     Moved out of inline style so that fullscreen overrides below
+     don't have to fight inline-style specificity. */
+  .result-player-wrap {
+    margin-top: 16px;
+    max-width: 780px;
+  }
+  .result-player-wrap #resultVideoFrame {
+    aspect-ratio: 16/9;
+    position: relative;
+    cursor: pointer;
+  }
+
+  /* Fullscreen layout for the result video + audio player.
+     In fullscreen mode the player overlays the video bottom and
+     auto-hides on mouse idle (cinema-style). */
+  .result-player-wrap:fullscreen,
+  .result-player-wrap:-webkit-full-screen {
+    background: #000;
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    cursor: none;             /* hidden by default; revealed when not idle */
+  }
+  .result-player-wrap.show-controls:fullscreen,
+  .result-player-wrap.show-controls:-webkit-full-screen { cursor: default; }
+  .result-player-wrap:fullscreen #resultVideoFrame,
+  .result-player-wrap:-webkit-full-screen #resultVideoFrame {
+    aspect-ratio: auto;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+  }
+  .result-player-wrap:fullscreen #resultVideo,
+  .result-player-wrap:-webkit-full-screen #resultVideo {
+    border-radius: 0;
+  }
+  .result-player-wrap:fullscreen #resultPlayer,
+  .result-player-wrap:-webkit-full-screen #resultPlayer {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    width: min(720px, 92vw);
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    margin: 0;
+    z-index: 10;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s ease;
+  }
+  .result-player-wrap.show-controls:fullscreen #resultPlayer,
+  .result-player-wrap.show-controls:-webkit-full-screen #resultPlayer {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .result-player-wrap:fullscreen #resultFsBtn,
+  .result-player-wrap:-webkit-full-screen #resultFsBtn {
+    opacity: 0;
+    transition: opacity .25s ease;
+  }
+  .result-player-wrap.show-controls:fullscreen #resultFsBtn,
+  .result-player-wrap.show-controls:-webkit-full-screen #resultFsBtn {
+    opacity: 0.7;
+  }
 
   /* Member photo gallery (read + add + delete) */
   .member-photo-grid {
@@ -3428,6 +3523,129 @@
     pointer-events: none !important;
     width: 0 !important; height: 0 !important;
   }
+
+  /* Member carousel fullscreen — show the custom BGM overlay below the
+     looping video. Inject is done by attachMemberBgmOverlay() in JS. */
+  .mem-final-stage:fullscreen,
+  .mem-final-stage:-webkit-full-screen {
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: none;
+  }
+  .mem-final-stage.mfs-show-controls:fullscreen,
+  .mem-final-stage.mfs-show-controls:-webkit-full-screen { cursor: default; }
+  .mem-final-stage:fullscreen video,
+  .mem-final-stage:-webkit-full-screen video {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    background: #000;
+  }
+  .mfs-bgm-overlay {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    width: min(720px, 92vw);
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    color: #fff;
+    z-index: 10;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s ease;
+  }
+  .mem-final-stage.mfs-show-controls .mfs-bgm-overlay {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .mfs-bgm-overlay button {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .mfs-bgm-overlay button:hover { background: rgba(255, 255, 255, 0.16); }
+  .mfs-bgm-overlay button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .mfs-bgm-overlay input[type="range"] { accent-color: #caa260; }
+
+  /* Video FX modes — apply to ANY container whose <video> we want to
+     flip horizontally (vfx-mirror) or replicate 4× rotated (vfx-quad).
+     The container needs position:relative and an aspect-stable shape.
+     Activated by adding the class to the container; un-applied by
+     removing it. Quad mode requires JS to inject .vfx-quad-grid. */
+  .vfx-mirror > video { transform: scaleX(-1); }
+  .vfx-quad   > video { opacity: 0 !important; pointer-events: none; }
+  /* Cardinal layout — 4 cells at N/E/S/W, each 60% size, anchored to
+     each edge (no overhang) and centered along the orthogonal axis.
+     Background-removal effect via mix-blend-mode: screen on the CELL
+     (not the video) so the rotated video composites first, then the
+     cell's full output blends with the grid's black bg. Putting blend
+     mode on the cell instead of the video avoids the stacking-context
+     issue caused by the rotation transform on the video. */
+  .vfx-quad-grid {
+    position: absolute; inset: 0;
+    background: #000;
+    border-radius: inherit;
+    overflow: hidden;
+    z-index: 2;
+    isolation: isolate;     /* keep blend-modes scoped to inside the grid */
+  }
+  .vfx-quad-cell {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    mix-blend-mode: screen;  /* black bg → transparent against grid black */
+    overflow: hidden;
+  }
+  .vfx-quad-cell video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: transparent;
+    display: block;
+    /* Stronger black-bg removal: contrast pushes near-blacks to true
+       black so they blend perfectly with the grid's #000 via screen.
+       The slight brightness bump compensates for the contrast crush. */
+    filter: contrast(1.25) brightness(1.05);
+  }
+  /* All 4 cells are the SAME 30%×30% square (uniform subject size).
+     W/E are pulled all the way to the center (left:20% / right:20%)
+     so they meet exactly at x=50% — no horizontal seam between them.
+     N/S keep their 5% top/bottom inset, touching W/E only at y=35%
+     and y=65% boundary lines.
+        every cell : 30% × 30%
+        W ↔ E      : touching at x=50%
+        N ↕ S      : 30% vertical gap (y=35%–65%) */
+  .vfx-quad-cell.cell-n { top: 5%;    left: 35%;  width: 30%; height: 30%; }
+  .vfx-quad-cell.cell-s { bottom: 5%; left: 35%;  width: 30%; height: 30%; }
+  .vfx-quad-cell.cell-e { right: 20%; top: 35%;   width: 30%; height: 30%; }
+  .vfx-quad-cell.cell-w { left: 20%;  top: 35%;   width: 30%; height: 30%; }
+  /* Rotations around the perimeter: N=0, E=90, S=180, W=270.
+     No scale() any more — the 1.5× zoom was clipping subjects
+     positioned near the top/bottom of the source frame. The video
+     fits the cell with object-fit:contain so nothing is clipped. */
+  .vfx-quad-cell.cell-n video { transform: rotate(0deg);   }
+  .vfx-quad-cell.cell-e video { transform: rotate(90deg);  }
+  .vfx-quad-cell.cell-s video { transform: rotate(180deg); }
+  .vfx-quad-cell.cell-w video { transform: rotate(270deg); }
+
+  /* FX toggle button (used inside #resultPlayer + member BGM overlay) */
+  .vfx-toggle-btn.is-on {
+    background: rgba(202, 162, 96, 0.35) !important;
+    border-color: rgba(202, 162, 96, 0.55) !important;
+    color: #fff;
+  }
   .mem-final-stage video {
     width: 100%; height: 100%;
     object-fit: contain;
@@ -4274,20 +4492,26 @@
       <div id="settingsCheck" class="check-list"></div>
     </div>
 
-    <!-- Member-only: BGM upload + photo gallery -->
+    <!-- Member-only: BGM playlist + photo gallery -->
     <div class="card-box pipe-member-only" id="memberBgmCard">
-      <h3>🎵 배경 음악</h3>
-      <p class="muted">최종 합성 영상에 깔릴 음악 파일을 업로드하세요 (mp3, m4a, wav 등 · 최대 ~10MB).</p>
+      <h3>🎵 배경 음악 (플레이리스트)</h3>
+      <p class="muted">여러 곡을 등록할 수 있어요. 최종 영상 재생 시 선택한 모드대로 동시 재생됩니다 (mp3, m4a, wav 등 · 곡당 최대 ~10MB).</p>
       <div class="member-bgm-zone" id="memberBgmDrop">
         <div class="ic">🎼</div>
-        <div class="t">음악 파일을 드래그하거나 클릭</div>
-        <div class="s" id="memberBgmStatus">아직 업로드된 음악이 없습니다</div>
+        <div class="t">＋ 음악 추가 (여러 파일 한 번에 가능)</div>
       </div>
-      <input type="file" id="memberBgmInput" accept="audio/*" style="display:none" />
-      <audio id="memberBgmPreview" controls style="width:100%; margin-top:10px; display:none"></audio>
-      <div style="text-align:right; margin-top:8px">
-        <button class="btn ghost sm" id="memberBgmClearBtn" style="display:none">✕ 삭제</button>
+      <input type="file" id="memberBgmInput" accept="audio/*" multiple style="display:none" />
+      <div id="memberBgmList" style="margin-top:10px"></div>
+      <div id="memberBgmModeRow" style="margin-top:14px; padding:10px 12px; background:rgba(255,255,255,0.04); border-radius:8px; display:none">
+        <div style="font-size:13px; opacity:.85; margin-bottom:6px">재생 모드</div>
+        <div class="bgm-modes">
+          <label><input type="radio" name="bgmMode" value="loop-all"> <span>전체 반복</span></label>
+          <label><input type="radio" name="bgmMode" value="shuffle"> <span>랜덤</span></label>
+          <label><input type="radio" name="bgmMode" value="once"> <span>순차 1회</span></label>
+          <label><input type="radio" name="bgmMode" value="single"> <span>한 곡 반복</span></label>
+        </div>
       </div>
+      <audio id="memberBgmPreview" preload="none" style="display:none"></audio>
     </div>
 
     <div class="card-box pipe-member-only" id="memberPhotoCard">
@@ -4355,8 +4579,42 @@
         <button class="btn ghost sm" id="rerunComposeBtn">↻ 합성만 다시</button>
       </div>
       <div id="composeStatus" class="muted"></div>
-      <div class="video-frame" style="margin-top:16px; aspect-ratio:16/9; max-width:780px">
-        <video id="resultVideo" controls style="width:100%; height:100%; background:#000; border-radius:12px"></video>
+      <!-- Video + player share a wrapper that goes fullscreen together.
+           In normal mode the player sits below the video; in fullscreen
+           it overlays the video bottom and auto-hides on mouse idle.
+           Sizing is in CSS now (not inline) so fullscreen can override
+           cleanly without specificity fights. -->
+      <div id="resultPlayerWrap" class="result-player-wrap">
+        <div class="video-frame" id="resultVideoFrame" title="클릭해서 전체화면">
+          <video id="resultVideo" loop muted playsinline preload="auto"
+                 style="width:100%; height:100%; background:#000; border-radius:12px; object-fit:contain"></video>
+          <button id="resultOverlayPlay" type="button"
+                  title="재생"
+                  style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.25); border:0; border-radius:12px; cursor:pointer; color:#fff; font-size:54px; opacity:0.8; transition:opacity .15s; pointer-events:none">
+            <span id="resultOverlayPlayIcon">▶</span>
+          </button>
+          <button id="resultFsBtn" type="button" title="전체화면"
+                  style="position:absolute; right:10px; bottom:10px; background:rgba(0,0,0,0.5); color:#fff; border:0; border-radius:6px; padding:6px 10px; font-size:14px; cursor:pointer; opacity:0.7; transition:opacity .15s">⛶</button>
+        </div>
+        <!-- Custom audio-driven player bar (controls the BGM playlist) -->
+        <div id="resultPlayer" class="result-player" style="margin-top:12px; padding:10px 14px; background:rgba(255,255,255,0.04); border-radius:10px; position:relative">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
+            <button id="rpPrev" type="button" class="btn ghost sm" title="이전 곡" style="padding:6px 12px; min-width:42px">⏮</button>
+            <button id="rpPlay" type="button" class="btn sm" title="재생/일시정지" style="padding:6px 16px; min-width:54px; font-size:16px">▶</button>
+            <button id="rpNext" type="button" class="btn ghost sm" title="다음 곡" style="padding:6px 12px; min-width:42px">⏭</button>
+            <button id="rpTitle" type="button" title="다른 곡 선택" style="flex:1; min-width:0; font-size:13px; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:transparent; border:0; color:inherit; text-align:left; cursor:pointer; padding:4px 6px; border-radius:4px">음악을 등록하면 여기에 표시됩니다</button>
+            <div id="rpCount" style="font-size:11px; opacity:.55; white-space:nowrap"></div>
+            <button id="rpMirror" type="button" class="btn ghost sm vfx-toggle-btn" title="좌우 반전" style="padding:6px 10px; min-width:36px">↔</button>
+            <button id="rpQuad"   type="button" class="btn ghost sm vfx-toggle-btn" title="사분할 (동서남북)" style="padding:6px 10px; min-width:36px">⊞</button>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px">
+            <span id="rpTime" style="font-size:11px; opacity:.6; min-width:34px; text-align:right">0:00</span>
+            <input id="rpSeek" type="range" min="0" max="0" value="0" step="0.1" style="flex:1; accent-color:#caa260; cursor:pointer">
+            <span id="rpDur"  style="font-size:11px; opacity:.6; min-width:34px">0:00</span>
+          </div>
+          <!-- Track-picker popup (rendered open above the title) -->
+          <div id="rpTrackList" style="display:none; position:absolute; left:14px; right:14px; bottom:calc(100% + 6px); max-height:280px; overflow-y:auto; background:#1a1014; border:1px solid rgba(255,255,255,0.12); border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.5); z-index:50"></div>
+        </div>
       </div>
       <div class="result-actions" style="margin-top:16px">
         <button class="btn" id="dlVideoBtn">⬇ 영상 다운로드</button>
@@ -6978,13 +7236,14 @@ async function _onbGenerateOneClip(idx){
   const startFrame = pipelineState.generatedFrames[c.first - 1];
   const endFrame   = pipelineState.generatedFrames[c.last  - 1];
   if (!startFrame || !endFrame) throw new Error('해당 클립에 필요한 프레임이 없습니다');
-  if (!aiKeys.kling?.access || !aiKeys.kling?.secret){
-    // Fall back to simulation clip (still useful as placeholder)
+  if (!hasVideoProviderConfigured()){
+    // Selected provider's credentials missing → simulation placeholder.
+    // We do NOT switch providers here.
     pipelineState.generatedClips[idx] = { startFrame, endFrame, dur: c.dur, simulated: true };
     await persistPipelineState();
     return null;
   }
-  const direct = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
+  const direct = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, idx);
   const videoUrl = wrapKlingUrlForCanvas(direct);
   pipelineState.generatedClips[idx] = { videoUrl, simulated: false };
   await persistPipelineState();
@@ -7077,8 +7336,25 @@ async function _onbRegenerateSelectedClips(){
 }
 
 async function _onbGenerateClips(){
-  if (!aiKeys.kling?.access || !aiKeys.kling?.secret){
-    _onbSetMakeStatus('Kling 키가 설정되지 않아 시뮬레이션 클립으로 진행합니다.');
+  // GUARD: prevent infinite recursion through renderOnboarding → bind → _onbGenerateClips
+  // when all clips end up as simulated (failed Replicate calls). Each bind() call would
+  // re-invoke us, and since simulated clips don't count as `videoUrl`, done never reaches
+  // need, leading to a runaway loop that floods Replicate with 429s.
+  if (window._onbGenerateClipsInflight) {
+    console.log('[onb] _onbGenerateClips already running, skip duplicate call');
+    return;
+  }
+  // STOP if Replicate credit is exhausted (set by previous run that hit 402 or
+  // "less than $5 credit" 429). Don't auto-retry — just show the charge prompt.
+  if (window._seedanceCreditExhausted) {
+    _onbSetMakeStatus('💳 Replicate 크레딧 부족 — replicate.com/account/billing 에서 충전 후 새로고침해주세요');
+    return;
+  }
+  window._onbGenerateClipsInflight = true;
+  try {
+
+  if (!hasVideoProviderConfigured()){
+    _onbSetMakeStatus(`${selectedVideoProvider()} 키가 설정되지 않아 시뮬레이션 클립으로 진행합니다.`);
   }
   const preset = pipelineState.preset;
   ensurePresetData(preset);
@@ -7094,41 +7370,117 @@ async function _onbGenerateClips(){
   _onbSetMakeStatus(
     existingDone > 0
       ? `클립 ${existingDone} / ${clips.length} · 이어서 진행 중`
-      : `클립 0 / ${clips.length} · 병렬 생성 중`
+      : `클립 0 / ${clips.length} · 순차 생성 중`
   );
-  // PARALLEL generation — fire all Kling API calls simultaneously.
-  // Kling can handle multiple concurrent jobs; total wait time is now
-  // ~max(per-clip) instead of sum(per-clip) → roughly 3× faster.
-  const tasks = clips.map(async (c, i) => {
-    // Skip already-completed clips
-    if (pipelineState.generatedClips[i]?.videoUrl) return;
+  // SEQUENTIAL generation — Replicate's rate limit drops to "burst 1" when
+  // account credit is below $5, so parallel calls all 429 except the first.
+  // We process clips one at a time with a backoff on 429.
+  // (Kling handles parallel fine; this only matters when provider=seedance,
+  //  but sequential is safe for both.)
+  const MIN_GAP_MS = 11000;  // 6 req/min ceiling = 10s spacing, +1s safety buffer
+  let last429At = 0;
+  for (let i = 0; i < clips.length; i++) {
+    const c = clips[i];
+    if (pipelineState.generatedClips[i]?.videoUrl) continue;  // already done
     const startFrame = pipelineState.generatedFrames[c.first - 1];
     const endFrame   = pipelineState.generatedFrames[c.last  - 1];
-    if (!startFrame || !endFrame) return;
+    if (!startFrame || !endFrame) continue;
+
+    // Inter-clip pacing — wait the rate-limit window if we 429'd recently
+    if (last429At && Date.now() - last429At < MIN_GAP_MS){
+      const wait = MIN_GAP_MS - (Date.now() - last429At);
+      _onbSetMakeStatus(`클립 ${done} / ${clips.length} · rate limit, ${Math.ceil(wait/1000)}s 대기`);
+      await new Promise(r => setTimeout(r, wait));
+    }
+
     try {
-      if (aiKeys.kling?.access && aiKeys.kling?.secret){
-        const direct = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
+      if (hasVideoProviderConfigured()){
+        const direct = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
         const videoUrl = wrapKlingUrlForCanvas(direct);
         pipelineState.generatedClips[i] = { videoUrl, simulated: false };
         done++;
-        _onbSetMakeStatus(`클립 ${done} / ${clips.length} · 병렬 생성 중`);
+        _onbSetMakeStatus(`클립 ${done} / ${clips.length} · 생성 중 (${selectedVideoProvider()})`);
       } else {
         pipelineState.generatedClips[i] = { startFrame, endFrame, dur: c.dur, simulated: true };
         done++;
         _onbSetMakeStatus(`클립 ${done} / ${clips.length} (시뮬레이션)`);
       }
-      // Persist after each clip completes so we don't lose progress on a crash
       persistPipelineState();
     } catch(e){
       console.warn('[onb clip', i, ']', e);
+      const msg = String(e?.message || e);
+
+      // CREDIT EXHAUSTED detection — multiple Replicate signals point here:
+      //   - 402 "Insufficient credit"          (zero balance)
+      //   - 429 "less than $5.0 in credit"     (sub-$5 throttle)
+      //   - "Go to https://replicate.com/account/billing"
+      // Once we detect any of these, STOP the loop entirely and surface a
+      // clear "충전하세요" prompt. Don't mark slots as simulated either —
+      // we want them to retry cleanly after the user tops up.
+      if (/Insufficient credit|less than \$.*credit|account\/billing|402/i.test(msg)) {
+        window._seedanceCreditExhausted = true;
+        console.warn('[onb] Replicate credit exhausted — stopping clip generation');
+        _onbSetMakeStatus('💳 Replicate 크레딧 부족 — replicate.com/account/billing 에서 충전 후 새로고침해주세요');
+        // Try to upgrade the wizard UI with a clearer banner if we can find
+        // the status DOM node. Falls back gracefully if it doesn't exist.
+        try {
+          const host = document.querySelector('.onb-makeview') || document.querySelector('#onbMakeStatus')?.parentNode;
+          if (host && !host.querySelector('.onb-credit-banner')){
+            const b = document.createElement('div');
+            b.className = 'onb-credit-banner';
+            b.style.cssText = 'margin:16px auto;max-width:420px;padding:16px 18px;border-radius:12px;background:rgba(220,180,90,0.15);border:1px solid rgba(220,180,90,0.5);color:#fff;text-align:center;font-size:14px;line-height:1.55';
+            b.innerHTML = '<div style="font-size:20px;margin-bottom:6px">💳</div>' +
+                          '<div style="font-weight:600;margin-bottom:8px">Replicate 크레딧 부족</div>' +
+                          '<div style="opacity:.85;margin-bottom:12px">영상 생성을 계속하려면 크레딧 충전이 필요합니다.</div>' +
+                          '<a href="https://replicate.com/account/billing#billing" target="_blank" rel="noopener" ' +
+                          'style="display:inline-block;padding:8px 16px;border-radius:8px;background:#caa260;color:#1a0f00;font-weight:600;text-decoration:none">충전하러 가기 →</a>' +
+                          '<div style="opacity:.6;margin-top:10px;font-size:12px">충전 후 페이지를 새로고침하면 다시 시작됩니다</div>';
+            host.appendChild(b);
+          }
+        } catch(_){}
+        break; // exit the for-loop — do NOT mark as simulated, do NOT continue.
+      }
+
+      // 429 backoff (non-credit) — keep the clip pending so a future attempt
+      // can succeed. The credit-specific case is already handled above.
+      if (/429|Too Many Requests|throttled|rate limit/i.test(msg)){
+        last429At = Date.now();
+        _onbSetMakeStatus(`클립 ${i+1} 429 → 대기 후 재시도`);
+        await new Promise(r => setTimeout(r, MIN_GAP_MS));
+        // Retry once
+        try {
+          const direct = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
+          const videoUrl = wrapKlingUrlForCanvas(direct);
+          pipelineState.generatedClips[i] = { videoUrl, simulated: false };
+          done++;
+          _onbSetMakeStatus(`클립 ${done} / ${clips.length} · 재시도 성공 (${selectedVideoProvider()})`);
+          persistPipelineState();
+          continue;
+        } catch(e2){
+          console.warn('[onb clip', i, '] retry failed:', e2);
+          // Re-check credit signal on the retry — Replicate sometimes only
+          // includes the "less than $5" hint in the retry response.
+          const msg2 = String(e2?.message || e2);
+          if (/Insufficient credit|less than \$.*credit|account\/billing|402/i.test(msg2)){
+            window._seedanceCreditExhausted = true;
+            _onbSetMakeStatus('💳 Replicate 크레딧 부족 — replicate.com/account/billing 에서 충전 후 새로고침해주세요');
+            break;
+          }
+        }
+      }
+      // Mark simulated only after we've exhausted retries AND the failure
+      // isn't credit-related.
       pipelineState.generatedClips[i] = { startFrame, endFrame, dur: c.dur, simulated: true };
       done++;
       _onbSetMakeStatus(`클립 ${done} / ${clips.length} (시뮬레이션)`);
       persistPipelineState();
     }
-  });
-  await Promise.allSettled(tasks);
+  }
   renderOnboarding();
+
+  } finally {
+    window._onbGenerateClipsInflight = false;
+  }
 }
 async function _onbGenerateCompose(){
   _onbSetMakeStatus('영상을 합치는 중…');
@@ -8465,16 +8817,295 @@ function _memSlotClick(e){
     return;
   }
   const v = slot.querySelector('video');
-  if (!v) return;
+  const stage = slot.querySelector('.mem-final-stage');
+  if (!v || !stage) return;
   const isFs = document.fullscreenElement || document.webkitFullscreenElement;
   if (isFs) {
     (document.exitFullscreen || document.webkitExitFullscreen).call(document);
   } else {
-    const req = v.requestFullscreen || v.webkitRequestFullscreen ||
-                v.webkitEnterFullscreen;
-    if (req) req.call(v);
-    try { v.muted = false; } catch(_){}
+    // Fullscreen the STAGE (not the bare <video>) so we can render the
+    // custom BGM overlay player on top of the video. Native controls
+    // remain hidden — our overlay drives playback timeline + tracks.
+    attachMemberBgmOverlay(stage, id);
+    const req = stage.requestFullscreen || stage.webkitRequestFullscreen;
+    if (req) {
+      try { req.call(stage); } catch(_){}
+    } else {
+      // Safari iOS only supports video.webkitEnterFullscreen — fall back
+      // to that and accept native controls (no overlay available).
+      try { (v.webkitEnterFullscreen||(()=>{})).call(v); v.muted = false; } catch(_){}
+    }
   }
+}
+
+// ============================================================
+//  Member-carousel BGM overlay (used in fullscreen mode)
+//  Renders a floating player on top of the looping video, wired to
+//  the BGM playlist for that target's preset. Auto-hides on idle,
+//  reveals on user activity, hides on background tap.
+// ============================================================
+let _memBgmOverlayBound = false;
+function attachMemberBgmOverlay(stage, targetId){
+  if (!stage) return;
+  const t = targets.find(x => String(x.id) === String(targetId));
+  if (!t) return;
+  const preset = t.preset || '활기찬';
+  const tracks = (bgmData[preset] || []).slice();
+  const mode = (bgmModeData && bgmModeData[preset]) || 'loop-all';
+
+  // Build (or reuse) the overlay DOM inside the stage
+  let overlay = stage.querySelector('.mfs-bgm-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'mfs-bgm-overlay';
+    overlay.innerHTML = `
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
+        <button data-act="prev" title="이전 곡" style="min-width:42px">⏮</button>
+        <button data-act="play" title="재생/일시정지" style="min-width:54px; font-size:16px">▶</button>
+        <button data-act="next" title="다음 곡" style="min-width:42px">⏭</button>
+        <button data-act="title" style="flex:1; text-align:left; font-size:13px; opacity:.9; padding:6px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">곡 선택</button>
+        <div data-role="count" style="font-size:11px; opacity:.55; white-space:nowrap"></div>
+        <button data-act="mirror" class="vfx-toggle-btn" title="좌우 반전" style="min-width:36px">↔</button>
+        <button data-act="quad"   class="vfx-toggle-btn" title="사분할 (동서남북)" style="min-width:36px">⊞</button>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px">
+        <span data-role="time" style="font-size:11px; opacity:.6; min-width:34px; text-align:right">0:00</span>
+        <input data-act="seek" type="range" min="0" max="0" value="0" step="0.1" style="flex:1; cursor:pointer">
+        <span data-role="dur" style="font-size:11px; opacity:.6; min-width:34px">0:00</span>
+      </div>
+      <div data-role="picker" style="display:none; position:absolute; left:14px; right:14px; bottom:calc(100% + 6px); max-height:280px; overflow-y:auto; background:#1a1014; border:1px solid rgba(255,255,255,0.12); border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.5); z-index:11"></div>`;
+    stage.appendChild(overlay);
+  }
+
+  // Dedicated audio element (one per stage)
+  let audio = stage.querySelector('audio.mfs-bgm-audio');
+  if (!audio) {
+    audio = document.createElement('audio');
+    audio.className = 'mfs-bgm-audio';
+    audio.preload = 'auto';
+    audio.style.display = 'none';
+    stage.appendChild(audio);
+  }
+
+  const video = stage.querySelector('video');
+  const btnPrev = overlay.querySelector('[data-act="prev"]');
+  const btnPlay = overlay.querySelector('[data-act="play"]');
+  const btnNext = overlay.querySelector('[data-act="next"]');
+  const btnTitle= overlay.querySelector('[data-act="title"]');
+  const btnMirror = overlay.querySelector('[data-act="mirror"]');
+  const btnQuad   = overlay.querySelector('[data-act="quad"]');
+  const seekEl  = overlay.querySelector('[data-act="seek"]');
+  const timeEl  = overlay.querySelector('[data-role="time"]');
+  const durEl   = overlay.querySelector('[data-role="dur"]');
+  const countEl = overlay.querySelector('[data-role="count"]');
+  const picker  = overlay.querySelector('[data-role="picker"]');
+
+  // State
+  let queue = tracks.slice();
+  let pos = 0;
+  let seekingByUser = false;
+  if (mode === 'shuffle') {
+    for (let i = queue.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [queue[i], queue[j]] = [queue[j], queue[i]];
+    }
+  } else if (mode === 'single') {
+    queue = queue.length > 0 ? [queue[0]] : [];
+  }
+
+  function fmt(t){
+    if (!Number.isFinite(t) || t < 0) return '0:00';
+    const m = Math.floor(t/60), s = Math.floor(t%60).toString().padStart(2,'0');
+    return `${m}:${s}`;
+  }
+  function refresh(){
+    const cur = queue[pos];
+    btnTitle.textContent = cur ? `🎵 ${cur.name}` : '등록된 음악이 없습니다';
+    countEl.textContent = queue.length > 0 ? `(${pos+1}/${queue.length})` : '';
+    btnPlay.textContent = (!audio.paused) ? '⏸' : '▶';
+    const navOk = queue.length > 1 && mode !== 'single';
+    btnPrev.disabled = !navOk;
+    btnNext.disabled = !navOk;
+    btnPlay.disabled = queue.length === 0;
+    if (!seekingByUser) {
+      seekEl.max = Number.isFinite(audio.duration) ? audio.duration : 0;
+      seekEl.value = audio.currentTime || 0;
+    }
+    timeEl.textContent = fmt(audio.currentTime);
+    durEl.textContent  = fmt(audio.duration);
+  }
+  async function loadAt(idx){
+    if (idx < 0 || idx >= queue.length) return false;
+    try {
+      const blob = await idb.get(queue[idx].idbKey);
+      if (!blob) return false;
+      try { URL.revokeObjectURL(audio.src); } catch(_){}
+      audio.src = URL.createObjectURL(blob);
+      pos = idx;
+      return true;
+    } catch(_){ return false; }
+  }
+  async function startPlayback(){
+    if (queue.length === 0) {
+      // No music → just play the video looping with sound off
+      try { await video.play(); } catch(_){}
+      return;
+    }
+    if (!audio.src) { if (!(await loadAt(pos))) return; }
+    try { await audio.play(); } catch(_){}
+    try { await video.play(); } catch(_){}
+  }
+  async function nextTrack(auto){
+    if (queue.length === 0) return;
+    if (mode === 'single') {
+      audio.currentTime = 0;
+      try { await audio.play(); } catch(_){}
+      return;
+    }
+    let np = pos + 1;
+    if (np >= queue.length) {
+      if (mode === 'once' && auto) { audio.pause(); video.pause(); refresh(); return; }
+      np = 0;
+      if (mode === 'shuffle') {
+        for (let i = queue.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [queue[i], queue[j]] = [queue[j], queue[i]];
+        }
+      }
+    }
+    if (await loadAt(np)) { try { await audio.play(); } catch(_){} }
+  }
+  async function prevTrack(){
+    if (queue.length === 0 || mode === 'single') return;
+    if (audio.currentTime > 3) { audio.currentTime = 0; return; }
+    let pp = pos - 1;
+    if (pp < 0) pp = queue.length - 1;
+    if (await loadAt(pp)) { try { await audio.play(); } catch(_){} }
+  }
+  function showPicker(){
+    if (queue.length === 0) {
+      picker.innerHTML = '<div style="padding:14px; opacity:.55; font-size:13px">등록된 곡이 없습니다</div>';
+    } else {
+      picker.innerHTML = queue.map((t, i) => {
+        const active = (i === pos);
+        const marker = active && !audio.paused ? '▶' : (active ? '◉' : (i+1));
+        const bg = active ? 'background:rgba(202,162,96,0.18);' : '';
+        return `<div data-pos="${i}" style="padding:10px 14px; display:flex; gap:10px; cursor:pointer; ${bg} border-bottom:1px solid rgba(255,255,255,0.05); font-size:13px">
+          <div style="min-width:22px; text-align:center; opacity:.7; font-size:12px">${marker}</div>
+          <div style="flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${escapeHtml(t.name)}</div>
+        </div>`;
+      }).join('');
+      picker.querySelectorAll('[data-pos]').forEach(r => {
+        r.addEventListener('click', async () => {
+          const p = parseInt(r.dataset.pos, 10);
+          if (p !== pos) { if (await loadAt(p)) { try { await audio.play(); } catch(_){} } }
+          else { audio.paused ? startPlayback() : audio.pause(); }
+          hidePicker();
+        });
+      });
+    }
+    picker.style.display = 'block';
+  }
+  function hidePicker(){ picker.style.display = 'none'; }
+
+  // === Bind once per overlay (each call to attach should still wire) ===
+  if (!overlay.dataset.bound) {
+    overlay.dataset.bound = '1';
+    btnPlay.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      audio.paused ? await startPlayback() : audio.pause();
+    });
+    btnPrev.addEventListener('click', (e) => { e.stopPropagation(); prevTrack(); });
+    btnNext.addEventListener('click', (e) => { e.stopPropagation(); nextTrack(false); });
+    btnTitle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      picker.style.display === 'block' ? hidePicker() : showPicker();
+    });
+    seekEl.addEventListener('input', () => {
+      seekingByUser = true;
+      timeEl.textContent = fmt(parseFloat(seekEl.value) || 0);
+    });
+    seekEl.addEventListener('change', () => {
+      if (audio.duration) audio.currentTime = parseFloat(seekEl.value) || 0;
+      seekingByUser = false;
+    });
+    // Video FX toggles (mirror / quad) — operate on the .mem-final-stage
+    // container; main video stays the source of truth for the 4 clones.
+    let stageFxMode = 'normal';
+    function setStageFx(m){
+      stageFxMode = m;
+      applyVideoFx(stage, m);
+      btnMirror?.classList.toggle('is-on', m === 'mirror');
+      btnQuad?.classList.toggle('is-on',   m === 'quad');
+    }
+    btnMirror?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setStageFx(stageFxMode === 'mirror' ? 'normal' : 'mirror');
+    });
+    btnQuad?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setStageFx(stageFxMode === 'quad' ? 'normal' : 'quad');
+    });
+    // Prevent button-row clicks from bubbling up to the stage (which would
+    // hide controls). Picker clicks are also internal.
+    overlay.addEventListener('click', e => e.stopPropagation());
+    audio.addEventListener('play',  refresh);
+    audio.addEventListener('pause', refresh);
+    audio.addEventListener('timeupdate', refresh);
+    audio.addEventListener('loadedmetadata', refresh);
+    audio.addEventListener('ended', () => nextTrack(true));
+  }
+
+  // === Stage-level interactivity: auto-hide + tap-background-to-hide ===
+  if (!stage.dataset.bgmOverlayBound) {
+    stage.dataset.bgmOverlayBound = '1';
+    let hideTimer = null;
+    const HIDE_MS = 2500;
+
+    function isFs(){
+      return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+    function showControls(){
+      stage.classList.add('mfs-show-controls');
+      clearTimeout(hideTimer);
+      if (isFs() && !audio.paused) {
+        hideTimer = setTimeout(() => stage.classList.remove('mfs-show-controls'), HIDE_MS);
+      }
+    }
+    function hideControls(){
+      stage.classList.remove('mfs-show-controls');
+      hidePicker();
+      clearTimeout(hideTimer);
+    }
+    // Activity = mouse/touch movement → show controls
+    ['mousemove','touchstart','touchmove'].forEach(ev => {
+      stage.addEventListener(ev, showControls, { passive: true });
+    });
+    // CLICK on the stage BACKGROUND (not on overlay or video) → toggle hide.
+    // Background = the dark area around the contain'd video.
+    stage.addEventListener('click', (e) => {
+      if (e.target.closest('.mfs-bgm-overlay')) return;
+      if (e.target === video) return;            // ignore clicks on video itself
+      // Toggle: if controls visible → hide; else → show
+      if (stage.classList.contains('mfs-show-controls')) hideControls();
+      else showControls();
+    });
+    // Fullscreen change — reveal initially, cleanup on exit
+    function onFsChange(){
+      if (isFs() && document.fullscreenElement === stage) {
+        showControls();
+        // Kick off playback so audio + video start together
+        startPlayback();
+      } else if (!isFs()) {
+        hideControls();
+        audio.pause();
+      }
+    }
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+  }
+
+  refresh();
 }
 
 function _memUpdateSlotClasses(){
@@ -9891,6 +10522,9 @@ let backgrounds  = store.get('backgrounds', { 1:null, 2:null });        // {1: d
 let frameData    = store.get('frameData', {});                          // {preset: [{visible, bg, prompt} x6]}
 let videoData    = store.get('videoData', {});                          // {preset: {slots:[clipIdx], clips:[{first,last,dur,prompt}]}}
 let bgmData      = store.get('bgmData', {});                            // {preset: [{name, dataUrl}]}
+// Playback mode per preset for the member BGM playlist.
+// values: 'loop-all' | 'shuffle' | 'once' | 'single'
+let bgmModeData  = store.get('bgmModeData', {});
 let aiKeys       = store.get('aiKeys', {
   gemini:{ model:'gemini-2.5-flash-image-preview', key:'' },
   kling: { model:'kling-v2-pro', access:'', secret:'' }
@@ -12139,88 +12773,361 @@ async function uploadImageToProxy(proxyBase, dataUrl){
    Triggered when admin sets aiKeys.videoProvider === 'seedance'.
    Returns a video URL (string) so callers stay unchanged.
 ============================================================ */
-async function callSeedanceClip(startImg, endImg, prompt, duration){
+async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
   const token = aiKeys.seedance?.token;
   const model = (aiKeys.seedance?.model || 'bytedance/seedance-2.0').trim();
   const resolution = (aiKeys.seedance?.resolution || '480p').trim();
   if (!token) throw new Error('Replicate API Token이 설정되지 않았습니다');
 
-  // Same small-framing enforcement we use for Kling
-  if (prompt && !/줌인 금지|do not zoom in|stays small/i.test(prompt)){
-    prompt = (prompt.trim().replace(/[.,\s]+$/, '')) +
-      ', 카메라 줌인 금지, 피사체는 화면 가운데 55% 이하로 작게 유지, 모든 움직임은 충분한 여백 안쪽에서만 발생, do not zoom in, subject stays small within frame';
-  }
+  // PROMPT ENGINEERING for Seedance 2.0 FLF mode:
+  // In strict first-last-frame mode the model is BOUNDARY-CONDITIONED by
+  // the two image anchors and infers motion between them. The text prompt
+  // is supplementary — describing the motion flavor, not the destination.
+  // Heavy directive prompts pull the model into regular i2v mode where
+  // last_frame_image becomes a soft hint again. Keep the prompt to the
+  // raw user-supplied motion description only (no anchor sentences).
+  prompt = (prompt || '').trim().replace(/[.,\s]+$/, '');
 
+  // Respect the user's clip duration setting as-is. (Earlier we capped to 5s
+  // because Seedance adheres to last_frame_image better at short lengths, but
+  // the user prefers honoring their UI setting; prompt-side anchors below
+  // handle the end-frame guidance instead.)
   const dInt = parseInt(duration) || 5;
 
-  // Build the input payload — Seedance 2.0 accepts `resolution`
-  // ('480p' / '720p'), older 1.x variants ignore it.
-  const input = {
-    image: startImg,
-    prompt: prompt || '',
-    duration: dInt,
-    aspect_ratio: '1:1',
-    resolution,
-    // last_frame supported by some Seedance variants — harmless to
-    // include; the API ignores unknown fields.
-    last_frame: endImg
+  // Discover the EXACT schema field names. Cache on window per model.
+  // (Cache key intentionally includes a version suffix so changes here
+  // bust the old cache without requiring users to hard-reload.)
+  const _schemaCacheKey = `_seedanceSchema_${model}_v3`;
+  if (!window[_schemaCacheKey]){
+    try {
+      // Bust browser/CDN cache — we hit this once per page load anyway,
+      // and a stale 404 from a prior server-zombie state was being reused.
+      // ALSO bounded by a 15s AbortController timeout so a hung upstream
+      // (Replicate API slow / our proxy slow) doesn't freeze the wizard.
+      const schemaCtl = new AbortController();
+      const schemaTimer = setTimeout(() => schemaCtl.abort(), 15000);
+      let sr;
+      try {
+        sr = await fetch(`/replicate-proxy/models/${model}?_=${Date.now()}`, {
+          method: 'GET',
+          cache: 'no-store',
+          signal: schemaCtl.signal,
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Cache-Control': 'no-cache, no-store, max-age=0',
+            'Pragma': 'no-cache'
+          }
+        });
+      } finally { clearTimeout(schemaTimer); }
+      if (sr.ok){
+        const meta = await sr.json();
+        const props = meta?.latest_version?.openapi_schema?.components?.schemas?.Input?.properties || {};
+        const fields = Object.keys(props);
+        window[_schemaCacheKey] = { fields, props };
+        console.log(`[Seedance schema] model=${model} ALL input fields:`, fields);
+        // Highlight everything that looks image/frame/strength/guidance related
+        const flagged = fields.filter(f => /image|frame|strength|guidance|scale|weight|seed|control/i.test(f));
+        console.log(`[Seedance schema] interesting fields:`, flagged);
+        flagged.forEach(f => {
+          const p = props[f] || {};
+          console.log(`  - ${f}:`, JSON.stringify({
+            type: p.type, default: p.default, description: p.description?.slice(0,120)
+          }));
+        });
+      } else {
+        console.warn('[Seedance schema] fetch failed:', sr.status, await sr.text().catch(()=>''));
+      }
+    } catch(e){ console.warn('[Seedance schema] error:', e.message); }
+  }
+  // Reference cached schema for field-name lookups below.
+  window._seedanceSchema = window[_schemaCacheKey];
+
+  // Pick the END-frame field name from the schema instead of hardcoding.
+  // Replicate's bytedance/seedance-2.0 uses `last_frame_image` (verified via
+  // schema fetch). Other Replicate models / variants may rename it — the
+  // candidate list lets us survive that without code changes.
+  const endFieldCandidates = ['last_frame_image', 'last_image', 'end_image', 'last_frame', 'image_last', 'tail_image'];
+  const schemaFields = window._seedanceSchema?.fields || [];
+  const endField = endFieldCandidates.find(f => schemaFields.includes(f)) || 'last_frame_image';
+
+  // Similarly resolve START-frame field name (typically `image` but verify).
+  const startFieldCandidates = ['image', 'first_image', 'start_image', 'image_url', 'init_image'];
+  const startField = startFieldCandidates.find(f => schemaFields.includes(f)) || 'image';
+
+  // SAME ROOT CAUSE AS KLING END-FRAME ISSUE:
+  // Replicate's image fields are declared `format: "uri"` in the model
+  // schema. Although data URIs are technically valid URIs, Seedance 2.0's
+  // `last_frame_image` adherence is much weaker with large inline base64
+  // than with a real HTTPS URL — same problem we solved with Kling by
+  // uploading frames to a proxy and passing back the public URL.
+  //
+  // Upload both start and end frames to our /img-cache/upload route here
+  // so Seedance fetches them as real images instead of decoding them
+  // from a megabyte-sized JSON payload.
+  async function _uploadFrameForSeedance(dataUrl, label){
+    // Resize and re-encode to JPEG first (same prep we do for Kling),
+    // then ship to the server. Target 1024px max side, JPEG q=0.92 keeps
+    // identity while shrinking 1.4MB PNG → ~200KB JPEG.
+    const small = await resizeDataUrl(dataUrl, 1024);
+    const b64 = dataUrlToBase64(small);
+    const ext = (dataUrlMime(small).split('/')[1] || 'jpg').replace('jpeg','jpg');
+    // 20s timeout so an unresponsive server doesn't hang the wizard's
+    // "동영상 클립" make step forever. If upload fails, callSeedanceClip
+    // falls back to inline data URI (lower quality but at least progresses).
+    const upCtl = new AbortController();
+    const upTimer = setTimeout(() => upCtl.abort(), 20000);
+    let r;
+    try {
+      r = await fetch('/img-cache/upload', {
+        method: 'POST',
+        signal: upCtl.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64: b64, ext, label })
+      });
+    } finally { clearTimeout(upTimer); }
+    if (!r.ok) throw new Error(`img-cache ${label} failed: ${r.status}`);
+    const j = await r.json();
+    if (!j.url) throw new Error(`img-cache ${label}: no url`);
+    return j.url;
+  }
+  let startUrlS, endUrlS;
+  try {
+    [startUrlS, endUrlS] = await Promise.all([
+      _uploadFrameForSeedance(startImg, 'seedance-start'),
+      endImg ? _uploadFrameForSeedance(endImg, 'seedance-end') : Promise.resolve(null)
+    ]);
+    console.log(`[Seedance] images hosted → start=${startUrlS} end=${endUrlS || 'none'}`);
+  } catch(e){
+    // Fall back to inline data URIs if hosting fails — better than crashing.
+    console.warn('[Seedance] img-cache upload failed, falling back to data URI inputs:', e.message);
+    startUrlS = startImg;
+    endUrlS   = endImg || null;
+  }
+
+  // MODE SELECTION:
+  // 'frame'     — image + last_frame_image (schema's dedicated keyframe fields)
+  // 'reference' — reference_images: [start, end] with [Image1]/[Image2] tags
+  //
+  // CRITICAL FLF TRIGGER (from BytePlus official docs):
+  //   "In first_last_frames mode, aspect ratio follows the reference image."
+  // ⇒ aspect_ratio MUST be 'adaptive' for the model to enter strict FLF mode.
+  //   Sending '1:1' (our previous default) forces the regular i2v code path
+  //   where last_frame_image is only a soft hint — this is the real cause of
+  //   the user's "end frame ignored" symptom.
+  const seedanceMode = (aiKeys.seedance?.mode || 'frame').trim();
+
+  const buildInput = (seed) => {
+    const inp = {
+      prompt: prompt || '',
+      duration: dInt,
+      aspect_ratio: 'adaptive',
+      resolution,
+      generate_audio: false,
+      // Undocumented passthrough params — Replicate often forwards unknown
+      // fields to the underlying model. The official ByteDance ModelArk
+      // FLF endpoint accepts these; if Replicate's wrapper forwards them
+      // they should tighten end-frame adherence. If not, they're ignored.
+      // Mirrors the Kling cfg_scale=0.2 trick that fixed our end-frame
+      // issue there.
+      cfg_scale: 0.2,
+      guidance_scale: 1.0,
+      image_strength: 1.0,
+      last_frame_image_strength: 1.0,
+      last_image_strength: 1.0
+    };
+    if (Number.isFinite(seed)) inp.seed = seed;
+
+    if (seedanceMode === 'reference' && endUrlS){
+      inp.reference_images = [startUrlS, endUrlS];
+      const rawMotion = (prompt || '').replace(/^Natural smooth transition.*?\.\s*\(/, '').replace(/\)\s*$/, '').trim();
+      inp.prompt = `Camera follows a smooth natural transition: starts in the exact pose of @Image1, ends in the exact pose of @Image2. ${rawMotion ? '(' + rawMotion + ')' : ''}`;
+    } else {
+      inp[startField] = startUrlS;
+      if (endUrlS) inp[endField] = endUrlS;
+    }
+    return inp;
   };
 
-  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s`);
+  let input = buildInput();
+  const modeTag = seedanceMode === 'reference' ? 'mode=reference(@Image1/2)' : `mode=frame(FLF adaptive) ${startField}/${endField}`;
+  console.log(`[Seedance] start prediction model=${model} resolution=${resolution} duration=${dInt}s aspect=adaptive ${modeTag} endSet=${endUrlS ? 'yes(url)' : 'no'} audio=off`);
   // Route through our server's CORS-safe proxy — browsers can't call
   // api.replicate.com directly. The proxy forwards the Authorization
   // header as-is and never persists the token.
-  const createResp = await fetch('/replicate-proxy/predictions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      'Prefer': 'wait'
-    },
-    body: JSON.stringify({ model, input })
-  });
+  //
+  // Replicate has TWO prediction endpoints:
+  //   * /v1/predictions                              — community models (needs `version` hash)
+  //   * /v1/models/{owner}/{name}/predictions        — OFFICIAL models like bytedance/seedance-2.0
+  //                                                    (no `version`, no `model` in body — just `input`)
+  // Seedance 2.0 is an official model, so we use the models/* route.
+  // The model string is "owner/name" (e.g. "bytedance/seedance-2.0").
+  // If the admin pasted a bare model name without a slash, default the owner to "bytedance".
+  const modelPath = /\//.test(model) ? model : `bytedance/${model}`;
 
-  if (!createResp.ok) {
-    const t = await createResp.text();
-    throw new Error(`Replicate create ${createResp.status}: ${t.slice(0, 200)}`);
-  }
-  let pred = await createResp.json();
-
-  // Poll until terminal status
-  const startTs = Date.now();
-  const TIMEOUT_MS = 8 * 60 * 1000; // 8 min
-  while (pred.status === 'starting' || pred.status === 'processing') {
-    if (Date.now() - startTs > TIMEOUT_MS) {
-      throw new Error('Seedance 생성 시간 초과 (8분)');
-    }
-    await new Promise(r => setTimeout(r, 4000));
-    const p = await fetch(`/replicate-proxy/predictions/${pred.id}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+  // Submit prediction + poll to terminal state. Pulled into a helper so we
+  // can retry once on the E005 "input or output flagged as sensitive" error
+  // — that filter is probabilistic and the same images often pass on retry
+  // with a different seed.
+  async function _runPrediction(inputPayload){
+    const cr = await fetch(`/replicate-proxy/models/${modelPath}/predictions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'wait'
+      },
+      body: JSON.stringify({ input: inputPayload })
     });
-    if (!p.ok) {
-      const t = await p.text();
-      throw new Error(`Replicate poll ${p.status}: ${t.slice(0, 200)}`);
+    if (!cr.ok) {
+      const t = await cr.text();
+      throw new Error(`Replicate create ${cr.status}: ${t.slice(0, 200)}`);
     }
-    pred = await p.json();
-    console.log(`[Seedance] status=${pred.status}`);
+    let pr = await cr.json();
+    const startTs = Date.now();
+    const TIMEOUT_MS = 8 * 60 * 1000;
+    while (pr.status === 'starting' || pr.status === 'processing') {
+      if (Date.now() - startTs > TIMEOUT_MS) throw new Error('Seedance 생성 시간 초과 (8분)');
+      await new Promise(r => setTimeout(r, 4000));
+      const p = await fetch(`/replicate-proxy/predictions/${pr.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!p.ok) { const t = await p.text(); throw new Error(`Replicate poll ${p.status}: ${t.slice(0, 200)}`); }
+      pr = await p.json();
+      console.log(`[Seedance] status=${pr.status}`);
+    }
+    return pr;
   }
+
+  let pred = await _runPrediction(input);
+
+  // Retry once on the E005 sensitivity false-positive.
+  // The Seedance safety filter is probabilistic — same inputs sometimes pass
+  // and sometimes fail. We retry with a fresh seed and the prompt-augmentation
+  // suffix stripped (the long "do not zoom in / 줌인 금지" tail can occasionally
+  // confuse the moderation heuristics).
+  if (pred.status !== 'succeeded' && /E005|flagged as sensitive/i.test(pred.error || '')){
+    console.warn('[Seedance] E005 sensitive flag — retrying once with fresh seed + shorter prompt');
+    const retrySeed = Math.floor(Math.random() * 1e9);
+    const retryInput = buildInput(retrySeed);
+    // Strip the long bilingual augmentation suffix
+    retryInput.prompt = (retryInput.prompt || '')
+      .replace(/,?\s*카메라 줌인 금지[\s\S]*$/, '')
+      .replace(/,?\s*do not zoom in[\s\S]*$/i, '')
+      .trim();
+    console.log(`[Seedance] retry prompt="${retryInput.prompt.slice(0,80)}..." seed=${retrySeed}`);
+    pred = await _runPrediction(retryInput);
+  }
+
   if (pred.status !== 'succeeded') {
     throw new Error(`Seedance ${pred.status}: ${pred.error || 'unknown'}`);
   }
   // Output can be a string URL or an array of URLs
   const out = pred.output;
-  const videoUrl = Array.isArray(out) ? out[0] : (typeof out === 'string' ? out : null);
-  if (!videoUrl) throw new Error('Seedance 응답에 비디오 URL 없음');
-  console.log(`[Seedance] done → ${videoUrl}`);
-  return videoUrl;
+  const replicateUrl = Array.isArray(out) ? out[0] : (typeof out === 'string' ? out : null);
+  if (!replicateUrl) throw new Error('Seedance 응답에 비디오 URL 없음');
+  console.log(`[Seedance] done → ${replicateUrl}`);
+
+  // Diagnostic — broken into individual console lines so nothing gets
+  // truncated. We need to see:
+  //   1) FULL logs (model may print warnings about ignored params)
+  //   2) WHICH input keys Replicate echoed back — that tells us whether
+  //      our undocumented passthroughs (cfg_scale, guidance_scale, ...)
+  //      were accepted by the underlying model or silently dropped.
+  //   3) The aspect_ratio Replicate received (adaptive vs something else).
+  try {
+    console.log('[Seedance diag] id=', pred.id, 'version=', pred.version, 'status=', pred.status);
+    console.log('[Seedance diag] metrics:', pred.metrics);
+    if (pred.input){
+      console.log('[Seedance diag] input keys echoed back:', Object.keys(pred.input));
+      console.log('[Seedance diag] input.aspect_ratio echoed:', pred.input.aspect_ratio);
+      console.log('[Seedance diag] input.duration echoed:', pred.input.duration);
+      console.log('[Seedance diag] input.cfg_scale echoed:', pred.input.cfg_scale);
+      console.log('[Seedance diag] input.guidance_scale echoed:', pred.input.guidance_scale);
+      console.log('[Seedance diag] input.image_strength echoed:', pred.input.image_strength);
+      console.log('[Seedance diag] input.last_frame_image_strength echoed:', pred.input.last_frame_image_strength);
+      console.log('[Seedance diag] input.last_image_strength echoed:', pred.input.last_image_strength);
+      console.log('[Seedance diag] input.last_frame_image set:', !!pred.input.last_frame_image);
+    }
+    // FULL logs — split into lines so console doesn't truncate
+    if (typeof pred.logs === 'string'){
+      const lines = pred.logs.split('\n');
+      console.log(`[Seedance diag] model logs (${lines.length} lines):`);
+      lines.forEach((line, i) => console.log(`  ${i+1}: ${line}`));
+    } else if (pred.logs){
+      console.log('[Seedance diag] model logs (non-string):', pred.logs);
+    }
+    if (pred.error) console.log('[Seedance diag] error:', pred.error);
+  } catch(e){
+    console.warn('[Seedance diag] dump failed:', e.message);
+  }
+
+  // Replicate delivery URLs are TEMPORARY (expire in ~24h with a 200-OK
+  // JSON "requested file not found" body). Download immediately and host
+  // locally so reload-after-expiry doesn't leave the clip slot black.
+  // The clipIdx is passed in via a stash on this function call (set by
+  // the caller) — falls back to a timestamp if unavailable.
+  try {
+    const targetId = (typeof currentTarget !== 'undefined' && currentTarget) ||
+                     (typeof onbState !== 'undefined' && onbState?.targetId) || null;
+    if (targetId && Number.isFinite(clipIdx)){
+      const saveResp = await fetch('/clip-cache/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: replicateUrl, targetId, clipIdx })
+      });
+      if (saveResp.ok) {
+        const j = await saveResp.json();
+        if (j?.url) {
+          console.log(`[Seedance] cached locally → ${j.url} (${(j.bytes/1024).toFixed(0)}KB)`);
+          return j.url;          // permanent URL
+        }
+      } else {
+        const t = await saveResp.text().catch(()=>'');
+        console.warn(`[Seedance] cache save failed (${saveResp.status}): ${t.slice(0,200)} — falling back to temporary Replicate URL`);
+      }
+    } else {
+      console.warn('[Seedance] no targetId/clipIdx for cache save — using temporary Replicate URL (will expire ~24h)');
+    }
+  } catch(e){
+    console.warn('[Seedance] cache save threw, using temporary URL:', e.message);
+  }
+  return replicateUrl;
 }
 
-async function callKlingClip(startImg, endImg, prompt, duration){
+// Helper used by all clip-generation gates. Returns true if the
+// currently-selected video provider has its required credentials.
+// This replaces the older hardcoded `aiKeys.kling?.access && aiKeys.kling?.secret`
+// check, which would falsely reject Seedance-only setups (no Kling keys).
+// IMPORTANT: this never falls back across providers — if Seedance is
+// selected, ONLY its token is considered.
+function hasVideoProviderConfigured(){
+  const provider = aiKeys.videoProvider || 'kling';
+  if (provider === 'seedance') return !!aiKeys.seedance?.token;
+  if (provider === 'kling')    return !!(aiKeys.kling?.access && aiKeys.kling?.secret);
+  return false;
+}
+function selectedVideoProvider(){
+  return aiKeys.videoProvider || 'kling';
+}
+
+async function callKlingClip(startImg, endImg, prompt, duration, clipIdx){
   // === Provider dispatch (added for multi-model support) ===
-  // If admin selected Seedance in 🤖 AI 설정 → 사용 모델 선택, route there
-  // without touching any of the original Kling logic below.
-  if (aiKeys.videoProvider === 'seedance') {
-    return callSeedanceClip(startImg, endImg, prompt, duration);
+  // STRICT mode: never silently fall back to Kling. If admin selected
+  // Seedance in 🤖 AI 설정 → 사용 모델 선택 we go to Seedance and stay
+  // there even on error — propagate up so the user sees the real cause
+  // (e.g. Replicate 402 Insufficient credit) instead of accidentally
+  // burning a Kling call.
+  // clipIdx (optional) is used by callSeedanceClip to cache the result
+  // server-side so the Replicate temporary URL doesn't go black on reload.
+  const provider = aiKeys.videoProvider || 'kling';
+  if (provider === 'seedance') {
+    if (!aiKeys.seedance?.token){
+      throw new Error('영상 모델로 Seedance가 선택되어 있는데 Replicate 토큰이 비어있습니다. AI 설정에서 토큰을 입력하거나, 영상 모델을 클링으로 바꾸세요. (자동 전환되지 않습니다)');
+    }
+    return callSeedanceClip(startImg, endImg, prompt, duration, clipIdx);
+  }
+  if (provider !== 'kling'){
+    throw new Error(`알 수 없는 영상 모델 provider: "${provider}". AI 설정에서 '클링 v3' 또는 'Seedance 2.0'을 선택하세요.`);
   }
   const access = aiKeys.kling?.access;
   const secret = aiKeys.kling?.secret;
@@ -12715,8 +13622,19 @@ function _clipPickHtml(i){
   </label>`;
 }
 function clipDoneHtml(i, videoUrl){
+  // Add a cache-busting query when this is a local /clip-cache/ URL.
+  let srcUrl = videoUrl;
+  if (typeof videoUrl === 'string' && videoUrl.startsWith('/clip-cache/')) {
+    const sep = videoUrl.includes('?') ? '&' : '?';
+    srcUrl = `${videoUrl}${sep}v=${Date.now()}`;
+  }
+  // Safari-friendly <video>:
+  //   - playsinline → required for autoplay on iOS Safari, also helps macOS
+  //   - preload="auto" → force load first frame even if autoplay blocked
+  //   - poster fallback handled by frame extraction is overkill; the muted
+  //     autoplay + playsinline combo unblocks most desktop cases.
   return `${_clipPickHtml(i)}
-   <div class="preview"><video src="${videoUrl}" muted autoplay loop></video></div>
+   <div class="preview"><video src="${srcUrl}" muted autoplay loop playsinline preload="auto"></video></div>
    <div class="overlay">
      <div class="lbl">클립 ${i+1}</div>
      ${clipMappingLabel(i)}
@@ -12782,27 +13700,42 @@ async function regenerateOneClip(i){
     alert(`클립 ${i+1}에 필요한 프레임이 없습니다 (시작: 프레임 ${c.first}, 끝: 프레임 ${c.last}).\n먼저 해당 프레임을 만드세요.`);
     return;
   }
-  if(!aiKeys.kling?.access || !aiKeys.kling?.secret){
-    alert('Kling 키가 설정되지 않았습니다.');
+  if(!hasVideoProviderConfigured()){
+    alert(`${selectedVideoProvider()} 키가 설정되지 않았습니다. AI 설정에서 키를 입력하거나 다른 영상 모델을 선택하세요. (자동 전환되지 않습니다)`);
     return;
   }
-  if(!confirm(`클립 ${i+1}만 다시 생성합니다.\n프레임 ${c.first} → 프레임 ${c.last} (${c.dur || '10초'})\n\n⚠ Kling API 비용이 발생합니다. 계속할까요?`)) return;
+  const _vp = selectedVideoProvider();
+  if(!confirm(`클립 ${i+1}만 다시 생성합니다.\n프레임 ${c.first} → 프레임 ${c.last} (${c.dur || '10초'})\n\n⚠ ${_vp.toUpperCase()} API 비용이 발생합니다. 계속할까요?`)) return;
 
   setProgItem('clipProgress', i, 'pending', clipPendingHtml(i, startFrame, endFrame));
   try {
-    console.log(`[Kling clip ${i+1} regen] startFrame=프레임${c.first} (len ${startFrame.length}), endFrame=프레임${c.last} (len ${endFrame.length})`);
-    const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
+    console.log(`[${_vp} clip ${i+1} regen] startFrame=프레임${c.first} (len ${startFrame.length}), endFrame=프레임${c.last} (len ${endFrame.length})`);
+    const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
     const videoUrl = wrapKlingUrlForCanvas(directUrl);
     pipelineState.generatedClips[i] = { videoUrl, simulated:false };
     await persistPipelineState();
     setProgItem('clipProgress', i, 'done', clipDoneHtml(i, videoUrl));
-    if(typeof prog !== 'undefined') prog.log(`✓ 클립 ${i+1} 재생성 완료 (Kling)`, 'ok');
+    if(typeof prog !== 'undefined') prog.log(`✓ 클립 ${i+1} 재생성 완료 (${_vp})`, 'ok');
   } catch(err){
     console.warn('Clip regen', i, err);
+    const errMsg = String(err?.message || err);
+    // CREDIT EXHAUSTED — surface a clear "충전하세요" alert and stop here.
+    // Do NOT mark as simulated; we want the user to retry after topping up.
+    if (/Insufficient credit|less than \$.*credit|account\/billing|402/i.test(errMsg)) {
+      window._seedanceCreditExhausted = true;
+      setProgItem('clipProgress', i, 'error', clipErrorHtml(i, '💳 크레딧 부족'));
+      if(typeof prog !== 'undefined') {
+        prog.log(`💳 Replicate 크레딧 부족 — replicate.com/account/billing 에서 충전 필요`, 'warn');
+      }
+      alert('Replicate 크레딧이 부족합니다.\n\nhttps://replicate.com/account/billing 에서 충전 후 다시 시도해주세요.');
+      return;
+    }
     pipelineState.generatedClips[i] = { startFrame, endFrame, dur:c.dur, simulated:true };
     await persistPipelineState();
     setProgItem('clipProgress', i, 'done', clipFallbackHtml(i, startFrame));
-    if(typeof prog !== 'undefined') prog.log(`⚠ 클립 ${i+1} 재생성 실패 → 시뮬레이션으로 대체 (${(err.message||'').slice(0,60)})`, 'warn');
+    // NOTE: "시뮬레이션 대체" means we show a still frame in place of the video.
+    // It does NOT mean we silently tried another provider — provider stays as configured.
+    if(typeof prog !== 'undefined') prog.log(`⚠ 클립 ${i+1} 재생성 실패 (${_vp}) → 정지 프레임으로 표시 (${(err.message||'').slice(0,60)})`, 'warn');
   }
 }
 window.regenerateOneClip = regenerateOneClip;
@@ -12954,11 +13887,11 @@ async function regenerateClipsBatch(){
     alert(`클립 ${missing.join(', ')} 은(는) 필요한 프레임이 없어 건너뜁니다. 먼저 해당 프레임을 만드세요.`);
   }
   if(valid.length === 0) return;
-  if(!aiKeys.kling?.access || !aiKeys.kling?.secret){
-    alert('Kling 키가 설정되지 않았습니다.');
+  if(!hasVideoProviderConfigured()){
+    alert(`${selectedVideoProvider()} 키가 설정되지 않았습니다. AI 설정에서 키를 입력하거나 다른 영상 모델을 선택하세요. (자동 전환되지 않습니다)`);
     return;
   }
-  if(!confirm(`클립 ${valid.map(i=>i+1).join(', ')} 을(를) 한 번에 재생성합니다.\nKling API 비용이 발생합니다. 계속할까요?`)) return;
+  if(!confirm(`클립 ${valid.map(i=>i+1).join(', ')} 을(를) 한 번에 재생성합니다.\n${selectedVideoProvider().toUpperCase()} API 비용이 발생합니다. 계속할까요?`)) return;
 
   const btn = document.getElementById('clipBatchRegenBtn');
   if(btn){ btn.disabled = true; btn.textContent = `재생성 중… (0/${valid.length})`; }
@@ -12972,19 +13905,21 @@ async function regenerateClipsBatch(){
     const startFrame = pipelineState.generatedFrames?.[c.first-1];
     const endFrame   = pipelineState.generatedFrames?.[c.last-1];
     setProgItem('clipProgress', i, 'pending', clipPendingHtml(i, startFrame, endFrame));
+    const _vpBatch = selectedVideoProvider();
     try {
-      const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
+      const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
       const videoUrl = wrapKlingUrlForCanvas(directUrl);
       pipelineState.generatedClips[i] = { videoUrl, simulated:false };
       await persistPipelineState();
       setProgItem('clipProgress', i, 'done', clipDoneHtml(i, videoUrl));
-      if(typeof prog !== 'undefined') prog.log(`✓ 클립 ${i+1} 일괄 재생성 완료 (Kling)`, 'ok');
+      if(typeof prog !== 'undefined') prog.log(`✓ 클립 ${i+1} 일괄 재생성 완료 (${_vpBatch})`, 'ok');
     } catch(err){
       console.warn('Clip batch regen', i, err);
       pipelineState.generatedClips[i] = { startFrame, endFrame, dur:c.dur, simulated:true };
       await persistPipelineState();
       setProgItem('clipProgress', i, 'done', clipFallbackHtml(i, startFrame));
-      if(typeof prog !== 'undefined') prog.log(`⚠ 클립 ${i+1} 일괄 재생성 실패 → 시뮬레이션 (${(err.message||'').slice(0,60)})`, 'warn');
+      // NOTE: simulated:true here = display still frame; provider is NOT switched.
+      if(typeof prog !== 'undefined') prog.log(`⚠ 클립 ${i+1} 일괄 재생성 실패 (${_vpBatch}) → 정지 프레임 표시 (${(err.message||'').slice(0,60)})`, 'warn');
     }
   }
   async function worker(){
@@ -13238,16 +14173,17 @@ async function _stageClips(){
     const startFrame = pipelineState.generatedFrames[c.first-1];
     const endFrame   = pipelineState.generatedFrames[c.last-1];
     try {
-      if(aiKeys.kling?.access && aiKeys.kling?.secret){
-        console.log(`[Kling clip ${i+1}] startFrame=프레임${c.first} (len ${startFrame.length}), endFrame=프레임${c.last} (len ${endFrame.length}), prompt="${(c.prompt||'').slice(0,40)}"`);
-        const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
+      if(hasVideoProviderConfigured()){
+        const vp = selectedVideoProvider();
+        console.log(`[${vp} clip ${i+1}] startFrame=프레임${c.first} (len ${startFrame.length}), endFrame=프레임${c.last} (len ${endFrame.length}), prompt="${(c.prompt||'').slice(0,40)}"`);
+        const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
         const videoUrl = wrapKlingUrlForCanvas(directUrl);
         pipelineState.generatedClips[i] = { videoUrl, simulated:false };
         persistPipelineState();
-        prog.log(`✓ 클립 ${i+1} 완성 (Kling)`, 'ok');
+        prog.log(`✓ 클립 ${i+1} 완성 (${vp})`, 'ok');
         setProgItem('clipProgress', i, 'done', clipDoneHtml(i, videoUrl));
       } else {
-        throw new Error('Kling 키 미설정');
+        throw new Error(`${selectedVideoProvider()} 키 미설정`);
       }
     } catch(err){
       console.warn('Clip', i, 'fallback:', err.message);
@@ -13525,17 +14461,18 @@ async function runPipeline(){
       const startFrame = pipelineState.generatedFrames[c.first-1];
       const endFrame   = pipelineState.generatedFrames[c.last-1];
       try {
-        if(aiKeys.kling?.access && aiKeys.kling?.secret){
-          const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur);
+        if(hasVideoProviderConfigured()){
+          const vp = selectedVideoProvider();
+          const directUrl = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
           const videoUrl = wrapKlingUrlForCanvas(directUrl);
           pipelineState.generatedClips[i] = { videoUrl, simulated:false };
           persistPipelineState();
-          prog.log(`✓ 클립 ${i+1} 완성 (Kling)`, 'ok');
+          prog.log(`✓ 클립 ${i+1} 완성 (${vp})`, 'ok');
           setProgItem('clipProgress', i, 'done',
-            `<div class="preview"><video src="${videoUrl}" muted autoplay loop></video></div>
+            `<div class="preview"><video src="${videoUrl}" muted autoplay loop playsinline preload="auto"></video></div>
              <div class="overlay"><div class="lbl">클립 ${i+1}</div></div>`);
         } else {
-          throw new Error('Kling 키 미설정');
+          throw new Error(`${selectedVideoProvider()} 키 미설정`);
         }
       } catch(err){
         console.warn('Clip', i, 'fallback:', err.message);
@@ -14149,7 +15086,20 @@ async function loadPipelineState(targetId){
   const data = useServer ? server : local;
   if(!data) return false;
 
-  pipelineState.refPhotos = data.refPhotos || (Array.isArray(local?.refPhotos) ? local.refPhotos : []);
+  // Pick refPhotos from the longest non-empty source so a stale empty-array
+  // server snapshot doesn't blow away photos that initPipelinePage just
+  // populated from target.photos. Empty arrays are truthy in JS, so the
+  // previous `data.refPhotos || ...` chain was overwriting legitimate
+  // photos with [].
+  {
+    const fromServer  = Array.isArray(data.refPhotos)         ? data.refPhotos          : null;
+    const fromLocal   = Array.isArray(local?.refPhotos)        ? local.refPhotos         : null;
+    const fromCurrent = Array.isArray(pipelineState.refPhotos) ? pipelineState.refPhotos : null;
+    const candidates  = [fromServer, fromLocal, fromCurrent].filter(x => x && x.length > 0);
+    pipelineState.refPhotos = candidates.length
+      ? candidates.sort((a, b) => b.length - a.length)[0]
+      : [];
+  }
   pipelineState.repImage = data.repImage || null;
   pipelineState.generatedFrames = data.generatedFrames || {};
   pipelineState.generatedClips = data.generatedClips || {};
@@ -14256,17 +15206,30 @@ function restorePipelineUI(){
       setProgItem('frameProgress', k, 'done', frameDoneHtml(+k, imgUrl));
     }
   }
-  // restore clip grid if any — use clipDoneHtml / clipFallbackHtml for ↻ button
-  const clipKeys = Object.keys(pipelineState.generatedClips);
-  if(clipKeys.length > 0){
+  // restore clip grid — iterate over the preset's clip definitions (not the
+  // state keys) so any clip-shaped hole in generatedClips renders as an
+  // empty regen slot instead of disappearing entirely. Replicate temporary
+  // URLs may also be dead by the time we get here; we still render them as
+  // a "done" slot — if the <video> fails to load, the ↻ 재생성 button is
+  // visible inside the same slot so the user can rebuild it on demand.
+  const _clipDefs = videoData[pipelineState.preset]?.clips || [];
+  if(_clipDefs.length > 0){
     $('#clipProgressBox').style.display = 'block';
     $('#clipProgress').innerHTML = '';
-    for(const k of clipKeys){
-      const c = pipelineState.generatedClips[k];
+    for(let k = 0; k < _clipDefs.length; k++){
+      const c = pipelineState.generatedClips?.[k];
+      const def = _clipDefs[k] || {};
+      const startFrame = pipelineState.generatedFrames?.[(def.first || (k+1)) - 1];
       if(c?.videoUrl){
-        setProgItem('clipProgress', k, 'done', clipDoneHtml(+k, c.videoUrl));
+        setProgItem('clipProgress', k, 'done', clipDoneHtml(k, c.videoUrl));
       } else if(c?.startFrame){
-        setProgItem('clipProgress', k, 'done', clipFallbackHtml(+k, c.startFrame));
+        setProgItem('clipProgress', k, 'done', clipFallbackHtml(k, c.startFrame));
+      } else if(startFrame){
+        // Slot exists in preset but never generated yet — show the start
+        // frame as a placeholder so the ↻ 재생성 button is reachable.
+        setProgItem('clipProgress', k, 'done', clipFallbackHtml(k, startFrame));
+      } else {
+        setProgItem('clipProgress', k, 'error', clipErrorHtml(k, '프레임 없음'));
       }
     }
   }
@@ -14397,24 +15360,23 @@ async function initPipelinePage(){
   // These cards are hidden for admins by CSS so calling them is safe.
   if (typeof wireMemberBgmCard === 'function')   wireMemberBgmCard();
   if (typeof renderMemberPhotoGrid === 'function') renderMemberPhotoGrid();
+  // Sync the BGM playlist with the final-video <video> element so audio
+  // plays alongside the video without being embedded in the mp4.
+  if (typeof wireMemberBgmSync === 'function')   wireMemberBgmSync();
 }
 
 /* ============================================================
    MEMBER-ONLY PIPELINE CARDS (BGM upload + photo gallery)
 ============================================================ */
 
-// Bind once: dropzone click / drag-drop / file picker / clear-btn
+// Bind once: dropzone click / drag-drop / file picker / mode radios
 let _memberBgmBound = false;
 function wireMemberBgmCard(){
   const drop   = document.getElementById('memberBgmDrop');
   const input  = document.getElementById('memberBgmInput');
-  const audio  = document.getElementById('memberBgmPreview');
-  const status = document.getElementById('memberBgmStatus');
-  const clear  = document.getElementById('memberBgmClearBtn');
-  if (!drop || !input || !audio || !status || !clear) return;
+  if (!drop || !input) return;
 
-  // Refresh display from existing bgmData for the current preset
-  refreshMemberBgmDisplay();
+  renderMemberBgmList();
 
   if (_memberBgmBound) return;
   _memberBgmBound = true;
@@ -14425,92 +15387,642 @@ function wireMemberBgmCard(){
   drop.addEventListener('dragleave', () => drop.classList.remove('dragging'));
   drop.addEventListener('drop', e => {
     e.preventDefault(); drop.classList.remove('dragging');
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleMemberBgmFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files) handleMemberBgmFiles(e.dataTransfer.files);
   });
   input.addEventListener('change', () => {
-    if (input.files && input.files[0]) handleMemberBgmFile(input.files[0]);
+    if (input.files && input.files.length) handleMemberBgmFiles(input.files);
     input.value = '';
   });
-  clear.addEventListener('click', clearMemberBgm);
+  // Mode radios — save on change + rebuild player queue
+  document.querySelectorAll('input[name="bgmMode"]').forEach(r => {
+    r.addEventListener('change', () => {
+      const preset = pipelineState.preset || '활기찬';
+      bgmModeData[preset] = r.value;
+      store.set('bgmModeData', bgmModeData);
+      if (typeof wireMemberBgmSync === 'function') wireMemberBgmSync();
+    });
+  });
 }
 
-async function handleMemberBgmFile(file){
-  if (!file || !file.type.startsWith('audio/')) {
-    flashToast('오디오 파일만 업로드할 수 있습니다');
-    return;
+async function handleMemberBgmFiles(fileList){
+  // Accept multiple at once. Each gets validated independently.
+  const preset = pipelineState.preset || '활기찬';
+  if (!bgmData[preset]) bgmData[preset] = [];
+  let added = 0;
+  for (const file of Array.from(fileList)) {
+    if (!file || !file.type.startsWith('audio/')) {
+      flashToast(`'${file?.name||'?'}' 은 오디오 파일이 아닙니다`);
+      continue;
+    }
+    const sizeMB = file.size / 1024 / 1024;
+    if (sizeMB > 12) {
+      flashToast(`'${file.name}' 너무 큽니다 (${sizeMB.toFixed(1)}MB) — 10MB 이하 권장`);
+      continue;
+    }
+    try {
+      const idbKey = `bgm_${preset}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      await idb.put(idbKey, file);
+      bgmData[preset].push({
+        name: file.name,
+        size: file.size,
+        idbKey,
+        addedAt: Date.now()
+      });
+      added++;
+    } catch(e){
+      console.error('[bgm upload]', file.name, e);
+      flashToast(`'${file.name}' 업로드 실패`);
+    }
   }
-  const sizeMB = file.size / 1024 / 1024;
-  if (sizeMB > 12) {
-    flashToast(`파일이 너무 큽니다 (${sizeMB.toFixed(1)}MB) — 10MB 이하 권장`);
+  if (added > 0) {
+    store.set('bgmData', bgmData);
+    flashToast(`🎵 ${added}곡 추가됨`);
+    renderMemberBgmList();
+    // Rebuild the player queue so newly added tracks become reachable
+    if (typeof wireMemberBgmSync === 'function') wireMemberBgmSync();
+  }
+}
+
+async function removeMemberBgmTrack(idbKey){
+  if (!confirm('이 곡을 삭제할까요?')) return;
+  const preset = pipelineState.preset || '활기찬';
+  const list = bgmData[preset] || [];
+  const idx = list.findIndex(t => t.idbKey === idbKey);
+  if (idx === -1) return;
+  try { await idb.del(idbKey); } catch(_){}
+  list.splice(idx, 1);
+  store.set('bgmData', bgmData);
+  renderMemberBgmList();
+  // Refresh the result-page player queue too
+  if (typeof wireMemberBgmSync === 'function') wireMemberBgmSync();
+  flashToast('곡이 삭제되었습니다');
+}
+window.removeMemberBgmTrack = removeMemberBgmTrack;
+
+async function previewMemberBgmTrack(idbKey){
+  const audio = document.getElementById('memberBgmPreview');
+  if (!audio) return;
+  // If already playing this track, toggle pause/play
+  if (audio.dataset.activeKey === idbKey && !audio.paused) {
+    audio.pause();
+    renderMemberBgmList();  // refresh play/pause icons
     return;
   }
   try {
-    const preset = pipelineState.preset || '활기찬';
-    if (!bgmData[preset]) bgmData[preset] = [];
-    // Replace member's existing BGM (single-slot UX, simpler than admin list)
-    // Remove old entry's idb blob if any
-    for (const old of bgmData[preset]) {
-      if (old.idbKey) { try { await idb.del(old.idbKey); } catch(_){} }
+    const blob = await idb.get(idbKey);
+    if (!blob) { flashToast('파일을 찾을 수 없습니다'); return; }
+    if (audio.dataset.activeKey !== idbKey) {
+      try { URL.revokeObjectURL(audio.src); } catch(_){}
+      audio.src = URL.createObjectURL(blob);
+      audio.dataset.activeKey = idbKey;
     }
-    const idbKey = `bgm_${preset}_${Date.now()}`;
-    await idb.set(idbKey, file);
-    bgmData[preset] = [{
-      name: file.name,
-      size: file.size,
-      idbKey,
-      addedAt: Date.now()
-    }];
-    store.set('bgmData', bgmData);
-    flashToast(`🎵 ${file.name} 등록 완료`);
-    refreshMemberBgmDisplay();
+    await audio.play();
+    renderMemberBgmList();
   } catch(e){
-    console.error('[member bgm upload] failed:', e);
-    flashToast('음악 업로드에 실패했습니다');
+    console.warn('[bgm preview]', e);
+    flashToast('재생 실패');
   }
 }
+window.previewMemberBgmTrack = previewMemberBgmTrack;
 
-async function clearMemberBgm(){
-  if (!confirm('등록된 음악을 삭제할까요?')) return;
+function renderMemberBgmList(){
+  const listEl = document.getElementById('memberBgmList');
+  const modeRow = document.getElementById('memberBgmModeRow');
+  if (!listEl) return;
   const preset = pipelineState.preset || '활기찬';
   const list = bgmData[preset] || [];
-  for (const old of list) {
-    if (old.idbKey) { try { await idb.del(old.idbKey); } catch(_){} }
-  }
-  bgmData[preset] = [];
-  store.set('bgmData', bgmData);
-  refreshMemberBgmDisplay();
-  flashToast('음악이 삭제되었습니다');
-}
+  const audio = document.getElementById('memberBgmPreview');
+  const activeKey = audio?.dataset.activeKey || null;
+  const isPlaying = audio && !audio.paused && activeKey;
 
-async function refreshMemberBgmDisplay(){
-  const audio  = document.getElementById('memberBgmPreview');
-  const status = document.getElementById('memberBgmStatus');
-  const clear  = document.getElementById('memberBgmClearBtn');
-  if (!audio || !status || !clear) return;
-  const preset = pipelineState.preset || '활기찬';
-  const list = bgmData[preset] || [];
   if (list.length === 0) {
-    status.textContent = '아직 업로드된 음악이 없습니다';
-    audio.style.display = 'none';
-    audio.removeAttribute('src');
-    clear.style.display = 'none';
+    listEl.innerHTML = '<div style="padding:14px; text-align:center; opacity:.55; font-size:13px">아직 업로드된 음악이 없습니다</div>';
+    if (modeRow) modeRow.style.display = 'none';
     return;
   }
-  const item = list[0];
-  status.textContent = `🎵 ${item.name}` + (item.size ? `  (${(item.size/1024/1024).toFixed(1)} MB)` : '');
-  clear.style.display = 'inline-block';
-  if (item.idbKey) {
+  if (modeRow) modeRow.style.display = 'block';
+
+  listEl.innerHTML = list.map((t, i) => {
+    const playing = (activeKey === t.idbKey && isPlaying);
+    const icon = playing ? '⏸' : '▶';
+    const mb = t.size ? `${(t.size/1024/1024).toFixed(1)} MB` : '';
+    return `
+      <div class="bgm-track" style="display:flex; align-items:center; gap:10px; padding:8px 10px; background:rgba(255,255,255,0.04); border-radius:6px; margin-bottom:6px">
+        <div style="min-width:22px; text-align:center; opacity:.55; font-size:12px">${i+1}</div>
+        <button type="button" class="btn ghost sm" onclick="previewMemberBgmTrack('${t.idbKey}')" style="padding:4px 10px; min-width:36px" title="미리듣기/일시정지">${icon}</button>
+        <div style="flex:1; min-width:0">
+          <div style="font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">🎵 ${escapeHtml(t.name)}</div>
+          <div style="font-size:11px; opacity:.5">${mb}</div>
+        </div>
+        <button type="button" class="btn ghost sm" onclick="removeMemberBgmTrack('${t.idbKey}')" style="padding:4px 10px" title="삭제">✕</button>
+      </div>`;
+  }).join('');
+
+  // Sync the mode radios with stored value
+  const mode = (bgmModeData && bgmModeData[preset]) || 'loop-all';
+  const radio = document.querySelector(`input[name="bgmMode"][value="${mode}"]`);
+  if (radio) radio.checked = true;
+
+  // Wire audio onended handler — re-render so play→pause icon swaps back
+  if (audio && !audio.dataset.endedBound) {
+    audio.dataset.endedBound = '1';
+    audio.addEventListener('ended', () => renderMemberBgmList());
+    audio.addEventListener('pause', () => renderMemberBgmList());
+    audio.addEventListener('play', () => renderMemberBgmList());
+  }
+}
+
+// Backwards-compat shim — older code paths might still call this name.
+async function refreshMemberBgmDisplay(){
+  renderMemberBgmList();
+}
+
+// ============================================================
+//  Final-video player — AUDIO-DRIVEN.
+//  The video loops silently in the background; the BGM playlist
+//  is the actual playback timeline (with seek/prev/next controls).
+//  Modes:
+//    'loop-all' : list order, loop forever
+//    'shuffle'  : Fisher–Yates shuffle, then loop
+//    'once'     : list order, stop after the last track
+//    'single'   : whichever track was last clicked (or [0]) on repeat
+// ============================================================
+let _memberBgmSyncBound = false;
+function wireMemberBgmSync(){
+  const video       = document.getElementById('resultVideo');
+  const audio       = document.getElementById('memberBgmPreview');
+  const playerCard  = document.getElementById('resultPlayer');
+  const overlayBtn  = document.getElementById('resultOverlayPlay');
+  const overlayIcon = document.getElementById('resultOverlayPlayIcon');
+  const btnPrev = document.getElementById('rpPrev');
+  const btnPlay = document.getElementById('rpPlay');
+  const btnNext = document.getElementById('rpNext');
+  const titleEl = document.getElementById('rpTitle');
+  const countEl = document.getElementById('rpCount');
+  const seekEl  = document.getElementById('rpSeek');
+  const timeEl  = document.getElementById('rpTime');
+  const durEl   = document.getElementById('rpDur');
+  if (!video || !audio || !playerCard) return;
+  if (_memberBgmSyncBound) {
+    // Already bound — just refresh queue (e.g. user switched targets)
+    rebuildQueueAndRefresh();
+    return;
+  }
+  _memberBgmSyncBound = true;
+
+  let queue = [];
+  let pos = 0;
+  let mode = 'loop-all';
+  let seekingByUser = false;
+
+  function fmtTime(t){
+    if (!Number.isFinite(t) || t < 0) return '0:00';
+    const m = Math.floor(t / 60);
+    const s = Math.floor(t % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  }
+  function refreshControls(){
+    const hasQueue = queue.length > 0;
+    const cur = hasQueue ? queue[pos] : null;
+    if (titleEl) titleEl.textContent = cur ? `🎵 ${cur.name}` : '음악을 등록하면 여기에 표시됩니다';
+    if (countEl) countEl.textContent = hasQueue ? `(${pos+1}/${queue.length})` : '';
+    if (btnPlay) btnPlay.textContent = (audio && !audio.paused) ? '⏸' : '▶';
+    // Disable prev/next in single mode or when only 1 track
+    const navOk = hasQueue && mode !== 'single' && queue.length > 1;
+    if (btnPrev) btnPrev.disabled = !navOk;
+    if (btnNext) btnNext.disabled = !navOk;
+    if (btnPlay) btnPlay.disabled = !hasQueue;
+    // Overlay big play button — visible while audio is paused
+    if (overlayBtn) {
+      const paused = !audio || audio.paused;
+      overlayBtn.style.pointerEvents = paused ? 'auto' : 'none';
+      overlayBtn.style.opacity = paused ? '0.85' : '0';
+      if (overlayIcon) overlayIcon.textContent = paused ? '▶' : '';
+    }
+    // Hide whole player card if nothing in queue
+    playerCard.style.opacity = hasQueue ? '1' : '0.55';
+  }
+  function refreshProgress(){
+    if (!seekEl || !timeEl || !durEl) return;
+    const dur = audio.duration || 0;
+    const cur = audio.currentTime || 0;
+    if (!seekingByUser) {
+      seekEl.max = Number.isFinite(dur) ? dur : 0;
+      seekEl.value = cur;
+    }
+    timeEl.textContent = fmtTime(cur);
+    durEl.textContent  = fmtTime(dur);
+  }
+
+  async function rebuildQueueAndRefresh(){
+    const preset = pipelineState.preset || '활기찬';
+    const list = (bgmData[preset] || []).slice();
+    mode = (bgmModeData && bgmModeData[preset]) || 'loop-all';
+    queue = list;
+    if (mode === 'shuffle') {
+      for (let i = queue.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [queue[i], queue[j]] = [queue[j], queue[i]];
+      }
+    } else if (mode === 'single') {
+      // Single-mode queue = [active or first track]
+      const activeKey = audio.dataset.activeKey;
+      const single = list.find(t => t.idbKey === activeKey) || list[0];
+      queue = single ? [single] : [];
+    }
+    pos = 0;
+    refreshControls();
+  }
+
+  async function loadAt(idx){
+    if (idx < 0 || idx >= queue.length) return false;
     try {
-      const blob = await idb.get(item.idbKey);
-      if (blob) {
-        audio.src = URL.createObjectURL(blob);
-        audio.style.display = 'block';
+      const blob = await idb.get(queue[idx].idbKey);
+      if (!blob) return false;
+      try { URL.revokeObjectURL(audio.src); } catch(_){}
+      audio.src = URL.createObjectURL(blob);
+      audio.dataset.activeKey = queue[idx].idbKey;
+      audio.dataset.queueIdx = String(idx);
+      pos = idx;
+      return true;
+    } catch(e){ console.warn('[player loadAt]', e); return false; }
+  }
+
+  async function startPlayback(){
+    // Always start (or resume) audio. Video loops silently in parallel.
+    if (queue.length === 0) {
+      // No BGM — fall back to just playing video without audio
+      try { video.muted = false; await video.play(); } catch(_){}
+      return;
+    }
+    if (!audio.src) {
+      if (!(await loadAt(pos))) return;
+    }
+    try { await audio.play(); } catch(_){}
+    try { await video.play(); } catch(_){}
+  }
+
+  async function nextTrack(auto){
+    if (queue.length === 0) return;
+    if (mode === 'single') {
+      audio.currentTime = 0;
+      try { await audio.play(); } catch(_){}
+      return;
+    }
+    let nextPos = pos + 1;
+    if (nextPos >= queue.length) {
+      if (mode === 'once' && auto) {
+        // End of playlist — stop everything
+        audio.pause();
+        video.pause();
+        refreshControls();
         return;
       }
-    } catch(_) {}
+      // Loop / shuffle wrap-around — rebuild for shuffle to re-randomize
+      await rebuildQueueAndRefresh();
+      nextPos = 0;
+    }
+    if (await loadAt(nextPos)) {
+      try { await audio.play(); } catch(_){}
+    }
   }
-  audio.style.display = 'none';
+
+  async function prevTrack(){
+    if (queue.length === 0 || mode === 'single') return;
+    // Within first 3s → previous track; else restart current
+    if (audio.currentTime > 3) {
+      audio.currentTime = 0;
+      return;
+    }
+    let prevPos = pos - 1;
+    if (prevPos < 0) prevPos = queue.length - 1;
+    if (await loadAt(prevPos)) {
+      try { await audio.play(); } catch(_){}
+    }
+  }
+
+  // === wire UI ===
+  btnPlay?.addEventListener('click', async () => {
+    if (audio.paused) await startPlayback(); else audio.pause();
+  });
+  btnPrev?.addEventListener('click', prevTrack);
+  btnNext?.addEventListener('click', () => nextTrack(false));
+  overlayBtn?.addEventListener('click', startPlayback);
+  seekEl?.addEventListener('input', () => {
+    seekingByUser = true;
+    timeEl.textContent = fmtTime(parseFloat(seekEl.value) || 0);
+  });
+  seekEl?.addEventListener('change', () => {
+    if (audio.duration) audio.currentTime = parseFloat(seekEl.value) || 0;
+    seekingByUser = false;
+  });
+
+  // === Track-list popup (click song title to switch tracks) ===
+  const trackListEl = document.getElementById('rpTrackList');
+  function renderTrackList(){
+    if (!trackListEl) return;
+    if (queue.length === 0) {
+      trackListEl.innerHTML = '<div style="padding:14px; opacity:.55; font-size:13px">등록된 곡이 없습니다</div>';
+      return;
+    }
+    trackListEl.innerHTML = queue.map((t, i) => {
+      const active = (i === pos);
+      const playing = active && audio && !audio.paused;
+      const marker = playing ? '▶' : (active ? '◉' : '');
+      const bg = active ? 'background:rgba(202,162,96,0.18);' : '';
+      return `
+        <div data-pos="${i}"
+             style="padding:10px 14px; display:flex; align-items:center; gap:10px; cursor:pointer; ${bg} border-bottom:1px solid rgba(255,255,255,0.05)"
+             onmouseover="this.style.background='rgba(255,255,255,0.06)'"
+             onmouseout="this.style.background='${active ? 'rgba(202,162,96,0.18)' : 'transparent'}'">
+          <div style="min-width:22px; text-align:center; opacity:.7; font-size:12px">${marker || (i+1)}</div>
+          <div style="flex:1; min-width:0; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${escapeHtml(t.name)}</div>
+        </div>`;
+    }).join('');
+    // Each row click → jump to that track
+    trackListEl.querySelectorAll('[data-pos]').forEach(row => {
+      row.addEventListener('click', async () => {
+        const target = parseInt(row.dataset.pos, 10);
+        if (Number.isFinite(target) && target !== pos) {
+          if (await loadAt(target)) {
+            try { await audio.play(); } catch(_){}
+          }
+        } else {
+          // Same track clicked — just toggle play/pause
+          if (audio.paused) startPlayback(); else audio.pause();
+        }
+        hideTrackList();
+      });
+    });
+  }
+  function showTrackList(){
+    if (!trackListEl) return;
+    renderTrackList();
+    trackListEl.style.display = 'block';
+    // Outside-click close (next tick so the opening click doesn't trigger it)
+    setTimeout(() => document.addEventListener('mousedown', outsideClose, { once: false }), 0);
+  }
+  function hideTrackList(){
+    if (!trackListEl) return;
+    trackListEl.style.display = 'none';
+    document.removeEventListener('mousedown', outsideClose);
+  }
+  function outsideClose(e){
+    if (!trackListEl.contains(e.target) && e.target !== titleEl) hideTrackList();
+  }
+  titleEl?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (trackListEl.style.display === 'block') hideTrackList(); else showTrackList();
+  });
+
+  // === Video FX (mirror / quad) toggle buttons ===
+  const btnMirror = document.getElementById('rpMirror');
+  const btnQuad   = document.getElementById('rpQuad');
+  const fxHost    = document.getElementById('resultVideoFrame');
+  let fxMode = 'normal';
+  function setFxMode(m){
+    fxMode = m;
+    applyVideoFx(fxHost, m);
+    btnMirror?.classList.toggle('is-on', m === 'mirror');
+    btnQuad?.classList.toggle('is-on',   m === 'quad');
+  }
+  btnMirror?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setFxMode(fxMode === 'mirror' ? 'normal' : 'mirror');
+  });
+  btnQuad?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setFxMode(fxMode === 'quad' ? 'normal' : 'quad');
+  });
+
+  // === Fullscreen + cinema-style auto-hide controls ===
+  const wrap     = document.getElementById('resultPlayerWrap');
+  const frame    = document.getElementById('resultVideoFrame');
+  const fsBtn    = document.getElementById('resultFsBtn');
+  if (wrap && frame) {
+    let hideTimer = null;
+    const HIDE_AFTER_MS = 2500;
+
+    function isFs(){
+      return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+    function showControls(){
+      wrap.classList.add('show-controls');
+      clearTimeout(hideTimer);
+      // Only schedule hide when fullscreen AND audio is playing
+      // (when paused, keep controls visible so the user can find Play)
+      if (isFs() && audio && !audio.paused) {
+        hideTimer = setTimeout(() => {
+          wrap.classList.remove('show-controls');
+        }, HIDE_AFTER_MS);
+      }
+    }
+    function enterFs(){
+      const el = wrap;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (req) { try { req.call(el); } catch(_){} }
+    }
+    function exitFs(){
+      const ex = document.exitFullscreen || document.webkitExitFullscreen;
+      if (ex) { try { ex.call(document); } catch(_){} }
+    }
+    function toggleFs(){
+      isFs() ? exitFs() : enterFs();
+    }
+
+    // Click the video frame to enter fullscreen (but not when clicking
+    // the play overlay or the fs button — they have their own handlers).
+    frame.addEventListener('click', (e) => {
+      if (e.target.closest('#resultOverlayPlay') ||
+          e.target.closest('#resultFsBtn')) return;
+      toggleFs();
+    });
+    fsBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleFs();
+    });
+
+    // Show controls on any user activity inside the wrapper
+    ['mousemove', 'touchstart', 'touchmove', 'keydown'].forEach(ev => {
+      wrap.addEventListener(ev, showControls, { passive: true });
+    });
+    // Background click in fullscreen → toggle hide. "Background" = anywhere
+    // outside the player card and outside the video element itself (the
+    // letterboxed dark area when the video doesn't fill the viewport).
+    wrap.addEventListener('click', (e) => {
+      if (!isFs()) return;
+      if (e.target.closest('#resultPlayer')) return;       // ignore clicks on controls
+      if (e.target.closest('#resultOverlayPlay')) return;  // ignore overlay play button
+      if (e.target.closest('#resultFsBtn')) return;        // ignore fs button
+      if (e.target === video) return;                      // ignore the video itself
+      // Hit the letterbox background → toggle controls
+      if (wrap.classList.contains('show-controls')) {
+        wrap.classList.remove('show-controls');
+        clearTimeout(hideTimer);
+      } else {
+        showControls();
+      }
+    });
+    // Also reveal when audio state changes (so the user can see what happened)
+    audio.addEventListener('play',  showControls);
+    audio.addEventListener('pause', showControls);
+
+    // Fullscreen state changes
+    function onFsChange(){
+      if (isFs()) {
+        showControls(); // reveal initially
+      } else {
+        wrap.classList.remove('show-controls');
+        clearTimeout(hideTimer);
+      }
+    }
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+  }
+
+  // === audio events ===
+  audio.addEventListener('ended', () => nextTrack(true));
+  audio.addEventListener('play',  () => {
+    // Make sure video is also rolling so visuals don't freeze
+    if (video.paused) { try { video.play(); } catch(_){} }
+    refreshControls();
+  });
+  audio.addEventListener('pause', () => {
+    // Pause video too so visuals freeze with audio
+    if (!video.paused) video.pause();
+    refreshControls();
+  });
+  audio.addEventListener('loadedmetadata', refreshProgress);
+  audio.addEventListener('timeupdate',    refreshProgress);
+
+  // Initial state
+  rebuildQueueAndRefresh();
 }
+
+function escapeHtml(s){
+  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ============================================================
+//  applyVideoFx — switch a video container between three modes:
+//   'normal' : single video, no transform
+//   'mirror' : single video, horizontal flip (scaleX(-1))
+//   'quad'   : four copies of the same source rotated 0/90/180/270°,
+//              arranged in a 2×2 pinwheel pattern around the center
+//
+//  host  = the container <div> that wraps a <video>. Must be
+//          position:relative.
+//  mode  = one of the three modes above.
+//
+//  The function manages a sibling <div class="vfx-quad-grid"> that
+//  holds the 4 cloned videos. They share the main video's src and
+//  are kept loosely in sync by mirroring play/pause/seek events.
+// ============================================================
+function applyVideoFx(host, mode){
+  if (!host) return;
+  const main = host.querySelector('video');
+  if (!main) { console.warn('[vfx] no main video found in host', host); return; }
+  console.log('[vfx] mode=', mode, 'host=', host.id || host.className,
+              'main.src=', (main.currentSrc || main.src || '').slice(0, 80),
+              'main.paused=', main.paused, 'main.readyState=', main.readyState);
+  host.classList.remove('vfx-mirror', 'vfx-quad');
+
+  // Tear down any existing quad grid first
+  const old = host.querySelector('.vfx-quad-grid');
+  if (old) {
+    if (old._cleanup) old._cleanup();
+    old.querySelectorAll('video').forEach(v => {
+      try { v.pause(); v.removeAttribute('src'); v.load(); } catch(_){}
+    });
+    old.remove();
+  }
+  if (mode === 'mirror') {
+    host.classList.add('vfx-mirror');
+    return;
+  }
+  if (mode === 'quad') {
+    host.classList.add('vfx-quad');
+    const srcUrl = main.currentSrc || main.src;
+    if (!srcUrl) {
+      console.warn('[vfx] main video has no src yet — quad mode will be empty');
+    }
+    const grid = document.createElement('div');
+    grid.className = 'vfx-quad-grid';
+    const cellDirs = ['n', 'e', 's', 'w'];
+    const cells = [];
+    cellDirs.forEach(dir => {
+      const cell = document.createElement('div');
+      cell.className = 'vfx-quad-cell cell-' + dir;
+      const v = document.createElement('video');
+      v.muted = true;
+      v.loop = true;
+      v.playsInline = true;
+      v.setAttribute('playsinline', '');
+      v.setAttribute('webkit-playsinline', '');
+      v.preload = 'auto';
+      if (srcUrl) v.src = srcUrl;
+      cell.appendChild(v);
+      grid.appendChild(cell);
+      cells.push(v);
+    });
+    host.appendChild(grid);
+    console.log('[vfx] quad grid added with 4 cells, src=', srcUrl?.slice(0, 80));
+
+    // Make sure main is playing so the clones aren't stuck on a black
+    // first frame. If main hasn't loaded yet, also kick it.
+    const ensureMainPlaying = () => {
+      if (main.paused) {
+        main.play().catch(err => console.warn('[vfx] main.play() failed:', err.message));
+      }
+    };
+    ensureMainPlaying();
+
+    // Start each clone — seek to main.currentTime, then play
+    cells.forEach((v, idx) => {
+      v.addEventListener('loadedmetadata', () => {
+        try { v.currentTime = main.currentTime || 0; } catch(_){}
+        v.play().then(() => {
+          console.log('[vfx] cell', idx, 'playing');
+        }).catch(err => {
+          console.warn('[vfx] cell', idx, 'play failed:', err.message);
+        });
+      }, { once: true });
+      // If src is already set and metadata is loaded (cached), the
+      // event above won't fire — kick it manually.
+      if (v.readyState >= 1) {
+        try { v.currentTime = main.currentTime || 0; } catch(_){}
+        v.play().catch(()=>{});
+      }
+    });
+
+    // Drift-correction + state mirroring
+    function syncAll(){
+      cells.forEach(v => {
+        if (Math.abs(v.currentTime - main.currentTime) > 0.5) {
+          try { v.currentTime = main.currentTime; } catch(_){}
+        }
+        if (main.paused && !v.paused) v.pause();
+        else if (!main.paused && v.paused) v.play().catch(()=>{});
+      });
+    }
+    const onPlay  = () => cells.forEach(v => v.play().catch(()=>{}));
+    const onPause = () => cells.forEach(v => v.pause());
+    const onSeek  = () => syncAll();
+    main.addEventListener('play',  onPlay);
+    main.addEventListener('pause', onPause);
+    main.addEventListener('seeked', onSeek);
+    grid._syncInterval = setInterval(syncAll, 3000);
+    grid._cleanup = () => {
+      main.removeEventListener('play',  onPlay);
+      main.removeEventListener('pause', onPause);
+      main.removeEventListener('seeked', onSeek);
+      clearInterval(grid._syncInterval);
+    };
+  }
+}
+window.applyVideoFx = applyVideoFx;
+
+// (Earlier single-slot BGM helper retired in favor of the playlist UI above.)
 
 // Photo grid: shows the same pipelineState.refPhotos data, with delete + add
 function renderMemberPhotoGrid(){
