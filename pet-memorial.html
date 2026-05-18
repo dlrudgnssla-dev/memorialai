@@ -12972,8 +12972,17 @@ function _clipPickHtml(i){
   </label>`;
 }
 function clipDoneHtml(i, videoUrl){
+  // Add a cache-busting query when this is a local /clip-cache/ URL.
+  // After a regen, the URL string is the same but the file on disk is new;
+  // ETag handles most cases but some browsers still serve stale on hard reload.
+  // Replicate delivery URLs already have unique paths so we skip them.
+  let srcUrl = videoUrl;
+  if (typeof videoUrl === 'string' && videoUrl.startsWith('/clip-cache/')) {
+    const sep = videoUrl.includes('?') ? '&' : '?';
+    srcUrl = `${videoUrl}${sep}v=${Date.now()}`;
+  }
   return `${_clipPickHtml(i)}
-   <div class="preview"><video src="${videoUrl}" muted autoplay loop></video></div>
+   <div class="preview"><video src="${srcUrl}" muted autoplay loop></video></div>
    <div class="overlay">
      <div class="lbl">클립 ${i+1}</div>
      ${clipMappingLabel(i)}

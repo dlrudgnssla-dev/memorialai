@@ -1055,8 +1055,20 @@ app.get('/clip-cache/:targetId/:filename', (req, res) => {
   if (denyIfNotOwned(req, res)) return;
   const file = path.join(CLIP_CACHE_DIR, targetId, filename);
   if (!fs.existsSync(file)) return res.status(404).end();
+  // CACHE STRATEGY: must-revalidate + ETag-from-mtime/size.
+  // The previous max-age=86400 made the browser reuse old mp4 bytes for
+  // 24h after regen, so users saw their OLD video even after a new one was
+  // cached server-side. Now: 304 when content hash (mtime+size) matches,
+  // full body when it changed. Cheap because the file is on local disk.
+  try {
+    const st = fs.statSync(file);
+    const etag = `W/"${st.size}-${st.mtimeMs.toString(36)}"`;
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'private, no-cache, must-revalidate');
+    res.setHeader('Last-Modified', new Date(st.mtimeMs).toUTCString());
+    if (req.headers['if-none-match'] === etag) return res.status(304).end();
+  } catch(_){}
   res.setHeader('Content-Type', 'video/mp4');
-  res.setHeader('Cache-Control', 'private, max-age=86400');
   fs.createReadStream(file).pipe(res);
 });
 
