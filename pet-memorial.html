@@ -1221,6 +1221,68 @@
   }
   .bgm-modes input[type="radio"] { accent-color: #caa260; }
 
+  /* Fullscreen layout for the result video + audio player.
+     In fullscreen mode the player overlays the video bottom and
+     auto-hides on mouse idle (cinema-style). Normal-mode styling
+     uses inline styles set on the elements themselves. */
+  .result-player-wrap:fullscreen,
+  .result-player-wrap:-webkit-full-screen {
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    margin: 0;
+    cursor: none;             /* hidden by default; revealed when not idle */
+  }
+  .result-player-wrap.show-controls:fullscreen,
+  .result-player-wrap.show-controls:-webkit-full-screen { cursor: default; }
+  .result-player-wrap:fullscreen .video-frame,
+  .result-player-wrap:-webkit-full-screen .video-frame {
+    max-width: none;
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+  }
+  .result-player-wrap:fullscreen #resultVideo,
+  .result-player-wrap:-webkit-full-screen #resultVideo {
+    border-radius: 0;
+  }
+  .result-player-wrap:fullscreen #resultPlayer,
+  .result-player-wrap:-webkit-full-screen #resultPlayer {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    width: min(720px, 92vw);
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    margin: 0;
+    z-index: 10;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s ease;
+  }
+  .result-player-wrap.show-controls:fullscreen #resultPlayer,
+  .result-player-wrap.show-controls:-webkit-full-screen #resultPlayer {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .result-player-wrap:fullscreen #resultFsBtn,
+  .result-player-wrap:-webkit-full-screen #resultFsBtn {
+    opacity: 0;
+    transition: opacity .25s ease;
+  }
+  .result-player-wrap.show-controls:fullscreen #resultFsBtn,
+  .result-player-wrap.show-controls:-webkit-full-screen #resultFsBtn {
+    opacity: 0.7;
+  }
+
   /* Member photo gallery (read + add + delete) */
   .member-photo-grid {
     display: grid;
@@ -4384,30 +4446,35 @@
         <button class="btn ghost sm" id="rerunComposeBtn">↻ 합성만 다시</button>
       </div>
       <div id="composeStatus" class="muted"></div>
-      <!-- Video loops silently in the background while the BGM playlist drives playback.
-           Native controls are hidden — see #resultPlayer below for the custom audio bar. -->
-      <div class="video-frame" style="margin-top:16px; aspect-ratio:16/9; max-width:780px; position:relative">
-        <video id="resultVideo" loop muted playsinline preload="auto"
-               style="width:100%; height:100%; background:#000; border-radius:12px; object-fit:contain"></video>
-        <button id="resultOverlayPlay" type="button"
-                title="재생"
-                style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.25); border:0; border-radius:12px; cursor:pointer; color:#fff; font-size:54px; opacity:0.8; transition:opacity .15s; pointer-events:none">
-          <span id="resultOverlayPlayIcon">▶</span>
-        </button>
-      </div>
-      <!-- Custom audio-driven player bar (controls the BGM playlist) -->
-      <div id="resultPlayer" class="result-player" style="margin-top:12px; max-width:780px; padding:10px 14px; background:rgba(255,255,255,0.04); border-radius:10px">
-        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
-          <button id="rpPrev" type="button" class="btn ghost sm" title="이전 곡" style="padding:6px 12px; min-width:42px">⏮</button>
-          <button id="rpPlay" type="button" class="btn sm" title="재생/일시정지" style="padding:6px 16px; min-width:54px; font-size:16px">▶</button>
-          <button id="rpNext" type="button" class="btn ghost sm" title="다음 곡" style="padding:6px 12px; min-width:42px">⏭</button>
-          <div id="rpTitle" style="flex:1; min-width:0; font-size:13px; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">음악을 등록하면 여기에 표시됩니다</div>
-          <div id="rpCount" style="font-size:11px; opacity:.55; white-space:nowrap"></div>
+      <!-- Video + player share a wrapper that goes fullscreen together.
+           In normal mode the player sits below the video; in fullscreen
+           it overlays the video bottom and auto-hides on mouse idle. -->
+      <div id="resultPlayerWrap" class="result-player-wrap" style="margin-top:16px; max-width:780px">
+        <div class="video-frame" id="resultVideoFrame" style="aspect-ratio:16/9; position:relative; cursor:pointer" title="클릭해서 전체화면">
+          <video id="resultVideo" loop muted playsinline preload="auto"
+                 style="width:100%; height:100%; background:#000; border-radius:12px; object-fit:contain"></video>
+          <button id="resultOverlayPlay" type="button"
+                  title="재생"
+                  style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.25); border:0; border-radius:12px; cursor:pointer; color:#fff; font-size:54px; opacity:0.8; transition:opacity .15s; pointer-events:none">
+            <span id="resultOverlayPlayIcon">▶</span>
+          </button>
+          <button id="resultFsBtn" type="button" title="전체화면"
+                  style="position:absolute; right:10px; bottom:10px; background:rgba(0,0,0,0.5); color:#fff; border:0; border-radius:6px; padding:6px 10px; font-size:14px; cursor:pointer; opacity:0.7; transition:opacity .15s">⛶</button>
         </div>
-        <div style="display:flex; align-items:center; gap:10px">
-          <span id="rpTime" style="font-size:11px; opacity:.6; min-width:34px; text-align:right">0:00</span>
-          <input id="rpSeek" type="range" min="0" max="0" value="0" step="0.1" style="flex:1; accent-color:#caa260; cursor:pointer">
-          <span id="rpDur"  style="font-size:11px; opacity:.6; min-width:34px">0:00</span>
+        <!-- Custom audio-driven player bar (controls the BGM playlist) -->
+        <div id="resultPlayer" class="result-player" style="margin-top:12px; padding:10px 14px; background:rgba(255,255,255,0.04); border-radius:10px">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
+            <button id="rpPrev" type="button" class="btn ghost sm" title="이전 곡" style="padding:6px 12px; min-width:42px">⏮</button>
+            <button id="rpPlay" type="button" class="btn sm" title="재생/일시정지" style="padding:6px 16px; min-width:54px; font-size:16px">▶</button>
+            <button id="rpNext" type="button" class="btn ghost sm" title="다음 곡" style="padding:6px 12px; min-width:42px">⏭</button>
+            <div id="rpTitle" style="flex:1; min-width:0; font-size:13px; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">음악을 등록하면 여기에 표시됩니다</div>
+            <div id="rpCount" style="font-size:11px; opacity:.55; white-space:nowrap"></div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px">
+            <span id="rpTime" style="font-size:11px; opacity:.6; min-width:34px; text-align:right">0:00</span>
+            <input id="rpSeek" type="range" min="0" max="0" value="0" step="0.1" style="flex:1; accent-color:#caa260; cursor:pointer">
+            <span id="rpDur"  style="font-size:11px; opacity:.6; min-width:34px">0:00</span>
+          </div>
         </div>
       </div>
       <div class="result-actions" style="margin-top:16px">
@@ -15231,6 +15298,74 @@ function wireMemberBgmSync(){
     if (audio.duration) audio.currentTime = parseFloat(seekEl.value) || 0;
     seekingByUser = false;
   });
+
+  // === Fullscreen + cinema-style auto-hide controls ===
+  const wrap     = document.getElementById('resultPlayerWrap');
+  const frame    = document.getElementById('resultVideoFrame');
+  const fsBtn    = document.getElementById('resultFsBtn');
+  if (wrap && frame) {
+    let hideTimer = null;
+    const HIDE_AFTER_MS = 2500;
+
+    function isFs(){
+      return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+    function showControls(){
+      wrap.classList.add('show-controls');
+      clearTimeout(hideTimer);
+      // Only schedule hide when fullscreen AND audio is playing
+      // (when paused, keep controls visible so the user can find Play)
+      if (isFs() && audio && !audio.paused) {
+        hideTimer = setTimeout(() => {
+          wrap.classList.remove('show-controls');
+        }, HIDE_AFTER_MS);
+      }
+    }
+    function enterFs(){
+      const el = wrap;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (req) { try { req.call(el); } catch(_){} }
+    }
+    function exitFs(){
+      const ex = document.exitFullscreen || document.webkitExitFullscreen;
+      if (ex) { try { ex.call(document); } catch(_){} }
+    }
+    function toggleFs(){
+      isFs() ? exitFs() : enterFs();
+    }
+
+    // Click the video frame to enter fullscreen (but not when clicking
+    // the play overlay or the fs button — they have their own handlers).
+    frame.addEventListener('click', (e) => {
+      if (e.target.closest('#resultOverlayPlay') ||
+          e.target.closest('#resultFsBtn')) return;
+      toggleFs();
+    });
+    fsBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleFs();
+    });
+
+    // Show controls on any user activity inside the wrapper
+    ['mousemove', 'touchstart', 'touchmove', 'keydown'].forEach(ev => {
+      wrap.addEventListener(ev, showControls, { passive: true });
+    });
+    // Also reveal when audio state changes (so the user can see what happened)
+    audio.addEventListener('play',  showControls);
+    audio.addEventListener('pause', showControls);
+
+    // Fullscreen state changes
+    function onFsChange(){
+      if (isFs()) {
+        showControls(); // reveal initially
+      } else {
+        wrap.classList.remove('show-controls');
+        clearTimeout(hideTimer);
+      }
+    }
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+  }
 
   // === audio events ===
   audio.addEventListener('ended', () => nextTrack(true));
