@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="build" content="0ba5a4e-all-inward" />
+<meta name="build" content="23ee3b0-fs-no-inline" />
 <title>MEMORIAL · Cinematic AI Tribute Videos</title>
 <script>
   // Build marker — printed on every page load so we can verify in the
   // browser console whether the user has the latest code or a cached
   // version. If you see this comment but no log, the page is stale.
-  console.log('%c[MEMORIAL] build=0ba5a4e-all-inward', 'color:#caa260;font-weight:600;background:#1a0f00;padding:2px 6px;border-radius:4px');
+  console.log('%c[MEMORIAL] build=23ee3b0-fs-no-inline', 'color:#caa260;font-weight:600;background:#1a0f00;padding:2px 6px;border-radius:4px');
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1221,35 +1221,40 @@
   }
   .bgm-modes input[type="radio"] { accent-color: #caa260; }
 
+  /* Normal-mode sizing for the result player wrapper + video frame.
+     Moved out of inline style so that fullscreen overrides below
+     don't have to fight inline-style specificity. */
+  .result-player-wrap {
+    margin-top: 16px;
+    max-width: 780px;
+  }
+  .result-player-wrap #resultVideoFrame {
+    aspect-ratio: 16/9;
+    position: relative;
+    cursor: pointer;
+  }
+
   /* Fullscreen layout for the result video + audio player.
      In fullscreen mode the player overlays the video bottom and
-     auto-hides on mouse idle (cinema-style). Normal-mode styling
-     uses inline styles set on the elements themselves.
-     IMPORTANT: inline style attributes (e.g. style="max-width:780px"
-     on the wrap, style="aspect-ratio:16/9" on video-frame) have
-     higher specificity than class rules — must use !important here
-     to override them in fullscreen mode, otherwise the wrap stays
-     pinned to 780px and isn't centered on the viewport. */
+     auto-hides on mouse idle (cinema-style). */
   .result-player-wrap:fullscreen,
   .result-player-wrap:-webkit-full-screen {
     background: #000;
-    display: flex !important;
-    align-items: center;
-    justify-content: center;
-    width: 100vw !important;
-    height: 100vh !important;
-    max-width: none !important;
-    margin: 0 !important;
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    margin: 0;
+    padding: 0;
     cursor: none;             /* hidden by default; revealed when not idle */
   }
   .result-player-wrap.show-controls:fullscreen,
   .result-player-wrap.show-controls:-webkit-full-screen { cursor: default; }
-  .result-player-wrap:fullscreen .video-frame,
-  .result-player-wrap:-webkit-full-screen .video-frame {
-    max-width: none !important;
-    width: 100% !important;
-    height: 100% !important;
-    aspect-ratio: auto !important;
+  .result-player-wrap:fullscreen #resultVideoFrame,
+  .result-player-wrap:-webkit-full-screen #resultVideoFrame {
+    aspect-ratio: auto;
+    width: 100%;
+    height: 100%;
+    max-width: none;
   }
   .result-player-wrap:fullscreen #resultVideo,
   .result-player-wrap:-webkit-full-screen #resultVideo {
@@ -4575,9 +4580,11 @@
       <div id="composeStatus" class="muted"></div>
       <!-- Video + player share a wrapper that goes fullscreen together.
            In normal mode the player sits below the video; in fullscreen
-           it overlays the video bottom and auto-hides on mouse idle. -->
-      <div id="resultPlayerWrap" class="result-player-wrap" style="margin-top:16px; max-width:780px">
-        <div class="video-frame" id="resultVideoFrame" style="aspect-ratio:16/9; position:relative; cursor:pointer" title="클릭해서 전체화면">
+           it overlays the video bottom and auto-hides on mouse idle.
+           Sizing is in CSS now (not inline) so fullscreen can override
+           cleanly without specificity fights. -->
+      <div id="resultPlayerWrap" class="result-player-wrap">
+        <div class="video-frame" id="resultVideoFrame" title="클릭해서 전체화면">
           <video id="resultVideo" loop muted playsinline preload="auto"
                  style="width:100%; height:100%; background:#000; border-radius:12px; object-fit:contain"></video>
           <button id="resultOverlayPlay" type="button"
