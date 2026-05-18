@@ -12169,15 +12169,23 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
     try {
       // Bust browser/CDN cache — we hit this once per page load anyway,
       // and a stale 404 from a prior server-zombie state was being reused.
-      const sr = await fetch(`/replicate-proxy/models/${model}?_=${Date.now()}`, {
-        method: 'GET',
-        cache: 'no-store',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Cache-Control': 'no-cache, no-store, max-age=0',
-          'Pragma': 'no-cache'
-        }
-      });
+      // ALSO bounded by a 15s AbortController timeout so a hung upstream
+      // (Replicate API slow / our proxy slow) doesn't freeze the wizard.
+      const schemaCtl = new AbortController();
+      const schemaTimer = setTimeout(() => schemaCtl.abort(), 15000);
+      let sr;
+      try {
+        sr = await fetch(`/replicate-proxy/models/${model}?_=${Date.now()}`, {
+          method: 'GET',
+          cache: 'no-store',
+          signal: schemaCtl.signal,
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Cache-Control': 'no-cache, no-store, max-age=0',
+            'Pragma': 'no-cache'
+          }
+        });
+      } finally { clearTimeout(schemaTimer); }
       if (sr.ok){
         const meta = await sr.json();
         const props = meta?.latest_version?.openapi_schema?.components?.schemas?.Input?.properties || {};
@@ -12230,11 +12238,20 @@ async function callSeedanceClip(startImg, endImg, prompt, duration, clipIdx){
     const small = await resizeDataUrl(dataUrl, 1024);
     const b64 = dataUrlToBase64(small);
     const ext = (dataUrlMime(small).split('/')[1] || 'jpg').replace('jpeg','jpg');
-    const r = await fetch('/img-cache/upload', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base64: b64, ext, label })
-    });
+    // 20s timeout so an unresponsive server doesn't hang the wizard's
+    // "동영상 클립" make step forever. If upload fails, callSeedanceClip
+    // falls back to inline data URI (lower quality but at least progresses).
+    const upCtl = new AbortController();
+    const upTimer = setTimeout(() => upCtl.abort(), 20000);
+    let r;
+    try {
+      r = await fetch('/img-cache/upload', {
+        method: 'POST',
+        signal: upCtl.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64: b64, ext, label })
+      });
+    } finally { clearTimeout(upTimer); }
     if (!r.ok) throw new Error(`img-cache ${label} failed: ${r.status}`);
     const j = await r.json();
     if (!j.url) throw new Error(`img-cache ${label}: no url`);
