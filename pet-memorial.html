@@ -14553,7 +14553,20 @@ async function loadPipelineState(targetId){
   const data = useServer ? server : local;
   if(!data) return false;
 
-  pipelineState.refPhotos = data.refPhotos || (Array.isArray(local?.refPhotos) ? local.refPhotos : []);
+  // Pick refPhotos from the longest non-empty source so a stale empty-array
+  // server snapshot doesn't blow away photos that initPipelinePage just
+  // populated from target.photos. Empty arrays are truthy in JS, so the
+  // previous `data.refPhotos || ...` chain was overwriting legitimate
+  // photos with [].
+  {
+    const fromServer  = Array.isArray(data.refPhotos)         ? data.refPhotos          : null;
+    const fromLocal   = Array.isArray(local?.refPhotos)        ? local.refPhotos         : null;
+    const fromCurrent = Array.isArray(pipelineState.refPhotos) ? pipelineState.refPhotos : null;
+    const candidates  = [fromServer, fromLocal, fromCurrent].filter(x => x && x.length > 0);
+    pipelineState.refPhotos = candidates.length
+      ? candidates.sort((a, b) => b.length - a.length)[0]
+      : [];
+  }
   pipelineState.repImage = data.repImage || null;
   pipelineState.generatedFrames = data.generatedFrames || {};
   pipelineState.generatedClips = data.generatedClips || {};
@@ -14870,7 +14883,9 @@ async function handleMemberBgmFile(file){
       if (old.idbKey) { try { await idb.del(old.idbKey); } catch(_){} }
     }
     const idbKey = `bgm_${preset}_${Date.now()}`;
-    await idb.set(idbKey, file);
+    // idb only exposes put/get/del/list (no `set`) — using set() always threw
+    // TypeError so member BGM uploads never persisted.
+    await idb.put(idbKey, file);
     bgmData[preset] = [{
       name: file.name,
       size: file.size,
