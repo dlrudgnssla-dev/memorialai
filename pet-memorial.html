@@ -7078,6 +7078,17 @@ async function _onbRegenerateSelectedClips(){
 }
 
 async function _onbGenerateClips(){
+  // GUARD: prevent infinite recursion through renderOnboarding → bind → _onbGenerateClips
+  // when all clips end up as simulated (failed Replicate calls). Each bind() call would
+  // re-invoke us, and since simulated clips don't count as `videoUrl`, done never reaches
+  // need, leading to a runaway loop that floods Replicate with 429s.
+  if (window._onbGenerateClipsInflight) {
+    console.log('[onb] _onbGenerateClips already running, skip duplicate call');
+    return;
+  }
+  window._onbGenerateClipsInflight = true;
+  try {
+
   if (!hasVideoProviderConfigured()){
     _onbSetMakeStatus(`${selectedVideoProvider()} 키가 설정되지 않아 시뮬레이션 클립으로 진행합니다.`);
   }
@@ -7095,41 +7106,76 @@ async function _onbGenerateClips(){
   _onbSetMakeStatus(
     existingDone > 0
       ? `클립 ${existingDone} / ${clips.length} · 이어서 진행 중`
-      : `클립 0 / ${clips.length} · 병렬 생성 중`
+      : `클립 0 / ${clips.length} · 순차 생성 중`
   );
-  // PARALLEL generation — fire all Kling API calls simultaneously.
-  // Kling can handle multiple concurrent jobs; total wait time is now
-  // ~max(per-clip) instead of sum(per-clip) → roughly 3× faster.
-  const tasks = clips.map(async (c, i) => {
-    // Skip already-completed clips
-    if (pipelineState.generatedClips[i]?.videoUrl) return;
+  // SEQUENTIAL generation — Replicate's rate limit drops to "burst 1" when
+  // account credit is below $5, so parallel calls all 429 except the first.
+  // We process clips one at a time with a backoff on 429.
+  // (Kling handles parallel fine; this only matters when provider=seedance,
+  //  but sequential is safe for both.)
+  const MIN_GAP_MS = 11000;  // 6 req/min ceiling = 10s spacing, +1s safety buffer
+  let last429At = 0;
+  for (let i = 0; i < clips.length; i++) {
+    const c = clips[i];
+    if (pipelineState.generatedClips[i]?.videoUrl) continue;  // already done
     const startFrame = pipelineState.generatedFrames[c.first - 1];
     const endFrame   = pipelineState.generatedFrames[c.last  - 1];
-    if (!startFrame || !endFrame) return;
+    if (!startFrame || !endFrame) continue;
+
+    // Inter-clip pacing — wait the rate-limit window if we 429'd recently
+    if (last429At && Date.now() - last429At < MIN_GAP_MS){
+      const wait = MIN_GAP_MS - (Date.now() - last429At);
+      _onbSetMakeStatus(`클립 ${done} / ${clips.length} · rate limit, ${Math.ceil(wait/1000)}s 대기`);
+      await new Promise(r => setTimeout(r, wait));
+    }
+
     try {
       if (hasVideoProviderConfigured()){
         const direct = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
         const videoUrl = wrapKlingUrlForCanvas(direct);
         pipelineState.generatedClips[i] = { videoUrl, simulated: false };
         done++;
-        _onbSetMakeStatus(`클립 ${done} / ${clips.length} · 병렬 생성 중 (${selectedVideoProvider()})`);
+        _onbSetMakeStatus(`클립 ${done} / ${clips.length} · 생성 중 (${selectedVideoProvider()})`);
       } else {
         pipelineState.generatedClips[i] = { startFrame, endFrame, dur: c.dur, simulated: true };
         done++;
         _onbSetMakeStatus(`클립 ${done} / ${clips.length} (시뮬레이션)`);
       }
-      // Persist after each clip completes so we don't lose progress on a crash
       persistPipelineState();
     } catch(e){
       console.warn('[onb clip', i, ']', e);
+      const msg = String(e?.message || e);
+      // 429 backoff — keep the clip pending (don't mark simulated) so a future
+      // attempt can succeed instead of permanently giving up.
+      if (/429|Too Many Requests|throttled|rate limit/i.test(msg)){
+        last429At = Date.now();
+        _onbSetMakeStatus(`클립 ${i+1} 429 → 대기 후 재시도`);
+        await new Promise(r => setTimeout(r, MIN_GAP_MS));
+        // Retry once
+        try {
+          const direct = await callKlingClip(startFrame, endFrame, c.prompt, c.dur, i);
+          const videoUrl = wrapKlingUrlForCanvas(direct);
+          pipelineState.generatedClips[i] = { videoUrl, simulated: false };
+          done++;
+          _onbSetMakeStatus(`클립 ${done} / ${clips.length} · 재시도 성공 (${selectedVideoProvider()})`);
+          persistPipelineState();
+          continue;
+        } catch(e2){
+          console.warn('[onb clip', i, '] retry failed:', e2);
+        }
+      }
+      // Mark simulated only after we've exhausted retries
       pipelineState.generatedClips[i] = { startFrame, endFrame, dur: c.dur, simulated: true };
       done++;
       _onbSetMakeStatus(`클립 ${done} / ${clips.length} (시뮬레이션)`);
       persistPipelineState();
     }
-  });
-  await Promise.allSettled(tasks);
+  }
   renderOnboarding();
+
+  } finally {
+    window._onbGenerateClipsInflight = false;
+  }
 }
 async function _onbGenerateCompose(){
   _onbSetMakeStatus('영상을 합치는 중…');
