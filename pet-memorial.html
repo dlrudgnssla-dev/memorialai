@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="build" content="afce1dc-quad-overlap-bg" />
+<meta name="build" content="bcdfb13-quad-blend-fix" />
 <title>MEMORIAL · Cinematic AI Tribute Videos</title>
 <script>
   // Build marker — printed on every page load so we can verify in the
   // browser console whether the user has the latest code or a cached
   // version. If you see this comment but no log, the page is stale.
-  console.log('%c[MEMORIAL] build=afce1dc-quad-overlap-bg', 'color:#caa260;font-weight:600;background:#1a0f00;padding:2px 6px;border-radius:4px');
+  console.log('%c[MEMORIAL] build=bcdfb13-quad-blend-fix', 'color:#caa260;font-weight:600;background:#1a0f00;padding:2px 6px;border-radius:4px');
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -3575,63 +3575,50 @@
      removing it. Quad mode requires JS to inject .vfx-quad-grid. */
   .vfx-mirror > video { transform: scaleX(-1); }
   .vfx-quad   > video { opacity: 0 !important; pointer-events: none; }
-  /* Cardinal layout — 4 cells positioned at N/E/S/W, each sized 70%
-     of the container so adjacent cells overlap at the edges (matches
-     the user's reference image where the dogs touch each other).
-     Background-removal effect via mix-blend-mode: screen — the videos'
-     pure-black background blends INTO the grid's black background and
-     effectively disappears, leaving only the (lighter-than-black)
-     subject visible. */
+  /* Cardinal layout — 4 cells at N/E/S/W, each 60% size, anchored to
+     each edge (no overhang) and centered along the orthogonal axis.
+     Background-removal effect via mix-blend-mode: screen on the CELL
+     (not the video) so the rotated video composites first, then the
+     cell's full output blends with the grid's black bg. Putting blend
+     mode on the cell instead of the video avoids the stacking-context
+     issue caused by the rotation transform on the video. */
   .vfx-quad-grid {
     position: absolute; inset: 0;
     background: #000;
     border-radius: inherit;
     overflow: hidden;
     z-index: 2;
+    isolation: isolate;     /* keep blend-modes scoped to inside the grid */
   }
   .vfx-quad-cell {
     position: absolute;
-    width: 70%;
-    height: 70%;
+    width: 60%;
+    height: 60%;
     display: flex;
     align-items: center;
     justify-content: center;
+    mix-blend-mode: screen;  /* black bg → transparent against grid black */
+    overflow: hidden;
   }
   .vfx-quad-cell video {
     width: 100%;
     height: 100%;
     object-fit: contain;
     background: transparent;
-    mix-blend-mode: screen;
+    display: block;
   }
-  .vfx-quad-cell.cell-n {
-    top: 0; left: 50%;
-    transform: translate(-50%, -10%);  /* nudge up slightly so heads breathe */
-  }
-  .vfx-quad-cell.cell-e {
-    right: 0; top: 50%;
-    transform: translate(10%, -50%);
-  }
-  .vfx-quad-cell.cell-s {
-    bottom: 0; left: 50%;
-    transform: translate(-50%, 10%);
-  }
-  .vfx-quad-cell.cell-w {
-    left: 0; top: 50%;
-    transform: translate(-10%, -50%);
-  }
-  /* Rotation applied to the <video> inside each cell. Cells already
-     positioned around the center; rotating the video makes the head
-     face inward (toward center) for each direction.
-        N: 0°    → head points up (away from center) — flip to 180° so head faces down
-        E: 90°   → head points right (away) — use 270° for head left
-        S: 180°  → head points down (away) — use 0° for head up
-        W: 270°  → head points left (away) — use 90° for head right
-     Effectively a CCW rotation pattern (subject orientation, not cell). */
-  .vfx-quad-cell.cell-n video { transform: rotate(0deg);   }   /* normal */
-  .vfx-quad-cell.cell-e video { transform: rotate(90deg);  }   /* CW 90 */
-  .vfx-quad-cell.cell-s video { transform: rotate(180deg); }   /* upside-down */
-  .vfx-quad-cell.cell-w video { transform: rotate(270deg); }   /* CCW 90 */
+  /* No transform on cell containers — top/right/bottom/left only.
+     Centered along the cross-axis: left = (100-60)/2 = 20% etc. */
+  .vfx-quad-cell.cell-n { top: 0;    left: 20%; }
+  .vfx-quad-cell.cell-e { right: 0;  top: 20%; }
+  .vfx-quad-cell.cell-s { bottom: 0; left: 20%; }
+  .vfx-quad-cell.cell-w { left: 0;   top: 20%; }
+  /* Adjacent cells overlap at the corners (e.g. N ∩ E spans x=40..80%,
+     y=20..60%) so dogs near cell centers visually touch each other. */
+  .vfx-quad-cell.cell-n video { transform: rotate(0deg);   }
+  .vfx-quad-cell.cell-e video { transform: rotate(90deg);  }
+  .vfx-quad-cell.cell-s video { transform: rotate(180deg); }
+  .vfx-quad-cell.cell-w video { transform: rotate(270deg); }
 
   /* FX toggle button (used inside #resultPlayer + member BGM overlay) */
   .vfx-toggle-btn.is-on {
