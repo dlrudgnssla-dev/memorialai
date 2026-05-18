@@ -7086,6 +7086,12 @@ async function _onbGenerateClips(){
     console.log('[onb] _onbGenerateClips already running, skip duplicate call');
     return;
   }
+  // STOP if Replicate credit is exhausted (set by previous run that hit 402 or
+  // "less than $5 credit" 429). Don't auto-retry — just show the charge prompt.
+  if (window._seedanceCreditExhausted) {
+    _onbSetMakeStatus('💳 Replicate 크레딧 부족 — replicate.com/account/billing 에서 충전 후 새로고침해주세요');
+    return;
+  }
   window._onbGenerateClipsInflight = true;
   try {
 
@@ -7145,8 +7151,40 @@ async function _onbGenerateClips(){
     } catch(e){
       console.warn('[onb clip', i, ']', e);
       const msg = String(e?.message || e);
-      // 429 backoff — keep the clip pending (don't mark simulated) so a future
-      // attempt can succeed instead of permanently giving up.
+
+      // CREDIT EXHAUSTED detection — multiple Replicate signals point here:
+      //   - 402 "Insufficient credit"          (zero balance)
+      //   - 429 "less than $5.0 in credit"     (sub-$5 throttle)
+      //   - "Go to https://replicate.com/account/billing"
+      // Once we detect any of these, STOP the loop entirely and surface a
+      // clear "충전하세요" prompt. Don't mark slots as simulated either —
+      // we want them to retry cleanly after the user tops up.
+      if (/Insufficient credit|less than \$.*credit|account\/billing|402/i.test(msg)) {
+        window._seedanceCreditExhausted = true;
+        console.warn('[onb] Replicate credit exhausted — stopping clip generation');
+        _onbSetMakeStatus('💳 Replicate 크레딧 부족 — replicate.com/account/billing 에서 충전 후 새로고침해주세요');
+        // Try to upgrade the wizard UI with a clearer banner if we can find
+        // the status DOM node. Falls back gracefully if it doesn't exist.
+        try {
+          const host = document.querySelector('.onb-makeview') || document.querySelector('#onbMakeStatus')?.parentNode;
+          if (host && !host.querySelector('.onb-credit-banner')){
+            const b = document.createElement('div');
+            b.className = 'onb-credit-banner';
+            b.style.cssText = 'margin:16px auto;max-width:420px;padding:16px 18px;border-radius:12px;background:rgba(220,180,90,0.15);border:1px solid rgba(220,180,90,0.5);color:#fff;text-align:center;font-size:14px;line-height:1.55';
+            b.innerHTML = '<div style="font-size:20px;margin-bottom:6px">💳</div>' +
+                          '<div style="font-weight:600;margin-bottom:8px">Replicate 크레딧 부족</div>' +
+                          '<div style="opacity:.85;margin-bottom:12px">영상 생성을 계속하려면 크레딧 충전이 필요합니다.</div>' +
+                          '<a href="https://replicate.com/account/billing#billing" target="_blank" rel="noopener" ' +
+                          'style="display:inline-block;padding:8px 16px;border-radius:8px;background:#caa260;color:#1a0f00;font-weight:600;text-decoration:none">충전하러 가기 →</a>' +
+                          '<div style="opacity:.6;margin-top:10px;font-size:12px">충전 후 페이지를 새로고침하면 다시 시작됩니다</div>';
+            host.appendChild(b);
+          }
+        } catch(_){}
+        break; // exit the for-loop — do NOT mark as simulated, do NOT continue.
+      }
+
+      // 429 backoff (non-credit) — keep the clip pending so a future attempt
+      // can succeed. The credit-specific case is already handled above.
       if (/429|Too Many Requests|throttled|rate limit/i.test(msg)){
         last429At = Date.now();
         _onbSetMakeStatus(`클립 ${i+1} 429 → 대기 후 재시도`);
@@ -7162,9 +7200,18 @@ async function _onbGenerateClips(){
           continue;
         } catch(e2){
           console.warn('[onb clip', i, '] retry failed:', e2);
+          // Re-check credit signal on the retry — Replicate sometimes only
+          // includes the "less than $5" hint in the retry response.
+          const msg2 = String(e2?.message || e2);
+          if (/Insufficient credit|less than \$.*credit|account\/billing|402/i.test(msg2)){
+            window._seedanceCreditExhausted = true;
+            _onbSetMakeStatus('💳 Replicate 크레딧 부족 — replicate.com/account/billing 에서 충전 후 새로고침해주세요');
+            break;
+          }
         }
       }
-      // Mark simulated only after we've exhausted retries
+      // Mark simulated only after we've exhausted retries AND the failure
+      // isn't credit-related.
       pipelineState.generatedClips[i] = { startFrame, endFrame, dur: c.dur, simulated: true };
       done++;
       _onbSetMakeStatus(`클립 ${done} / ${clips.length} (시뮬레이션)`);
@@ -13131,6 +13178,18 @@ async function regenerateOneClip(i){
     if(typeof prog !== 'undefined') prog.log(`✓ 클립 ${i+1} 재생성 완료 (${_vp})`, 'ok');
   } catch(err){
     console.warn('Clip regen', i, err);
+    const errMsg = String(err?.message || err);
+    // CREDIT EXHAUSTED — surface a clear "충전하세요" alert and stop here.
+    // Do NOT mark as simulated; we want the user to retry after topping up.
+    if (/Insufficient credit|less than \$.*credit|account\/billing|402/i.test(errMsg)) {
+      window._seedanceCreditExhausted = true;
+      setProgItem('clipProgress', i, 'error', clipErrorHtml(i, '💳 크레딧 부족'));
+      if(typeof prog !== 'undefined') {
+        prog.log(`💳 Replicate 크레딧 부족 — replicate.com/account/billing 에서 충전 필요`, 'warn');
+      }
+      alert('Replicate 크레딧이 부족합니다.\n\nhttps://replicate.com/account/billing 에서 충전 후 다시 시도해주세요.');
+      return;
+    }
     pipelineState.generatedClips[i] = { startFrame, endFrame, dur:c.dur, simulated:true };
     await persistPipelineState();
     setProgItem('clipProgress', i, 'done', clipFallbackHtml(i, startFrame));
