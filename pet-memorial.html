@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="build" content="285f566-bgm-playlist" />
+<meta name="build" content="5842bb2-track-picker" />
 <title>MEMORIAL · Cinematic AI Tribute Videos</title>
 <script>
   // Build marker — printed on every page load so we can verify in the
   // browser console whether the user has the latest code or a cached
   // version. If you see this comment but no log, the page is stale.
-  console.log('%c[MEMORIAL] build=285f566-bgm-playlist', 'color:#caa260;font-weight:600;background:#1a0f00;padding:2px 6px;border-radius:4px');
+  console.log('%c[MEMORIAL] build=5842bb2-track-picker', 'color:#caa260;font-weight:600;background:#1a0f00;padding:2px 6px;border-radius:4px');
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -3499,19 +3499,32 @@
   /* Hide iOS Safari's native ▶ play-button overlay that appears when
      autoplay is blocked. Multiple selectors because iOS keeps moving
      them around between versions. */
-  .mem-final-stage video::-webkit-media-controls,
-  .mem-final-stage video::-webkit-media-controls-panel,
-  .mem-final-stage video::-webkit-media-controls-enclosure,
-  .mem-final-stage video::-webkit-media-controls-overlay-enclosure,
-  .mem-final-stage video::-webkit-media-controls-overlay-play-button,
-  .mem-final-stage video::-webkit-media-controls-start-playback-button,
-  .mem-final-stage video::-webkit-media-text-track-container {
+  .mem-final-stage video:not([controls])::-webkit-media-controls,
+  .mem-final-stage video:not([controls])::-webkit-media-controls-panel,
+  .mem-final-stage video:not([controls])::-webkit-media-controls-enclosure,
+  .mem-final-stage video:not([controls])::-webkit-media-controls-overlay-enclosure,
+  .mem-final-stage video:not([controls])::-webkit-media-controls-overlay-play-button,
+  .mem-final-stage video:not([controls])::-webkit-media-controls-start-playback-button,
+  .mem-final-stage video:not([controls])::-webkit-media-text-track-container {
     display: none !important;
     -webkit-appearance: none !important;
     opacity: 0 !important;
     visibility: hidden !important;
     pointer-events: none !important;
     width: 0 !important; height: 0 !important;
+  }
+  /* In fullscreen the user can ASK for controls (we add the attribute
+     dynamically in JS). Restore the native controls panel by reversing
+     the hide above. */
+  .mem-final-stage video[controls]::-webkit-media-controls,
+  .mem-final-stage video[controls]::-webkit-media-controls-panel,
+  .mem-final-stage video[controls]::-webkit-media-controls-enclosure {
+    display: flex !important;
+    -webkit-appearance: media-controls !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    width: auto !important; height: auto !important;
   }
   .mem-final-stage video {
     width: 100%; height: 100%;
@@ -4462,12 +4475,12 @@
                   style="position:absolute; right:10px; bottom:10px; background:rgba(0,0,0,0.5); color:#fff; border:0; border-radius:6px; padding:6px 10px; font-size:14px; cursor:pointer; opacity:0.7; transition:opacity .15s">⛶</button>
         </div>
         <!-- Custom audio-driven player bar (controls the BGM playlist) -->
-        <div id="resultPlayer" class="result-player" style="margin-top:12px; padding:10px 14px; background:rgba(255,255,255,0.04); border-radius:10px">
+        <div id="resultPlayer" class="result-player" style="margin-top:12px; padding:10px 14px; background:rgba(255,255,255,0.04); border-radius:10px; position:relative">
           <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
             <button id="rpPrev" type="button" class="btn ghost sm" title="이전 곡" style="padding:6px 12px; min-width:42px">⏮</button>
             <button id="rpPlay" type="button" class="btn sm" title="재생/일시정지" style="padding:6px 16px; min-width:54px; font-size:16px">▶</button>
             <button id="rpNext" type="button" class="btn ghost sm" title="다음 곡" style="padding:6px 12px; min-width:42px">⏭</button>
-            <div id="rpTitle" style="flex:1; min-width:0; font-size:13px; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">음악을 등록하면 여기에 표시됩니다</div>
+            <button id="rpTitle" type="button" title="다른 곡 선택" style="flex:1; min-width:0; font-size:13px; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:transparent; border:0; color:inherit; text-align:left; cursor:pointer; padding:4px 6px; border-radius:4px">음악을 등록하면 여기에 표시됩니다</button>
             <div id="rpCount" style="font-size:11px; opacity:.55; white-space:nowrap"></div>
           </div>
           <div style="display:flex; align-items:center; gap:10px">
@@ -4475,6 +4488,8 @@
             <input id="rpSeek" type="range" min="0" max="0" value="0" step="0.1" style="flex:1; accent-color:#caa260; cursor:pointer">
             <span id="rpDur"  style="font-size:11px; opacity:.6; min-width:34px">0:00</span>
           </div>
+          <!-- Track-picker popup (rendered open above the title) -->
+          <div id="rpTrackList" style="display:none; position:absolute; left:14px; right:14px; bottom:calc(100% + 6px); max-height:280px; overflow-y:auto; background:#1a1014; border:1px solid rgba(255,255,255,0.12); border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.5); z-index:50"></div>
         </div>
       </div>
       <div class="result-actions" style="margin-top:16px">
@@ -8683,6 +8698,20 @@ function _memSlotClick(e){
   if (isFs) {
     (document.exitFullscreen || document.webkitExitFullscreen).call(document);
   } else {
+    // Show native browser controls (play/pause, seek, volume) ONLY while
+    // in fullscreen so the carousel thumbnail stays clean. We attach a
+    // one-shot listener that strips the attribute when fullscreen exits.
+    try { v.setAttribute('controls', ''); } catch(_){}
+    const cleanup = () => {
+      const stillFs = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!stillFs) {
+        try { v.removeAttribute('controls'); } catch(_){}
+        document.removeEventListener('fullscreenchange', cleanup);
+        document.removeEventListener('webkitfullscreenchange', cleanup);
+      }
+    };
+    document.addEventListener('fullscreenchange', cleanup);
+    document.addEventListener('webkitfullscreenchange', cleanup);
     const req = v.requestFullscreen || v.webkitRequestFullscreen ||
                 v.webkitEnterFullscreen;
     if (req) req.call(v);
@@ -15297,6 +15326,64 @@ function wireMemberBgmSync(){
   seekEl?.addEventListener('change', () => {
     if (audio.duration) audio.currentTime = parseFloat(seekEl.value) || 0;
     seekingByUser = false;
+  });
+
+  // === Track-list popup (click song title to switch tracks) ===
+  const trackListEl = document.getElementById('rpTrackList');
+  function renderTrackList(){
+    if (!trackListEl) return;
+    if (queue.length === 0) {
+      trackListEl.innerHTML = '<div style="padding:14px; opacity:.55; font-size:13px">등록된 곡이 없습니다</div>';
+      return;
+    }
+    trackListEl.innerHTML = queue.map((t, i) => {
+      const active = (i === pos);
+      const playing = active && audio && !audio.paused;
+      const marker = playing ? '▶' : (active ? '◉' : '');
+      const bg = active ? 'background:rgba(202,162,96,0.18);' : '';
+      return `
+        <div data-pos="${i}"
+             style="padding:10px 14px; display:flex; align-items:center; gap:10px; cursor:pointer; ${bg} border-bottom:1px solid rgba(255,255,255,0.05)"
+             onmouseover="this.style.background='rgba(255,255,255,0.06)'"
+             onmouseout="this.style.background='${active ? 'rgba(202,162,96,0.18)' : 'transparent'}'">
+          <div style="min-width:22px; text-align:center; opacity:.7; font-size:12px">${marker || (i+1)}</div>
+          <div style="flex:1; min-width:0; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${escapeHtml(t.name)}</div>
+        </div>`;
+    }).join('');
+    // Each row click → jump to that track
+    trackListEl.querySelectorAll('[data-pos]').forEach(row => {
+      row.addEventListener('click', async () => {
+        const target = parseInt(row.dataset.pos, 10);
+        if (Number.isFinite(target) && target !== pos) {
+          if (await loadAt(target)) {
+            try { await audio.play(); } catch(_){}
+          }
+        } else {
+          // Same track clicked — just toggle play/pause
+          if (audio.paused) startPlayback(); else audio.pause();
+        }
+        hideTrackList();
+      });
+    });
+  }
+  function showTrackList(){
+    if (!trackListEl) return;
+    renderTrackList();
+    trackListEl.style.display = 'block';
+    // Outside-click close (next tick so the opening click doesn't trigger it)
+    setTimeout(() => document.addEventListener('mousedown', outsideClose, { once: false }), 0);
+  }
+  function hideTrackList(){
+    if (!trackListEl) return;
+    trackListEl.style.display = 'none';
+    document.removeEventListener('mousedown', outsideClose);
+  }
+  function outsideClose(e){
+    if (!trackListEl.contains(e.target) && e.target !== titleEl) hideTrackList();
+  }
+  titleEl?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (trackListEl.style.display === 'block') hideTrackList(); else showTrackList();
   });
 
   // === Fullscreen + cinema-style auto-hide controls ===
