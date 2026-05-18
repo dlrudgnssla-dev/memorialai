@@ -1204,6 +1204,22 @@
   .member-bgm-zone .ic { font-size: 38px; margin-bottom: 8px; }
   .member-bgm-zone .t { font-size: 14px; color: #f0e8ff; margin-bottom: 4px; }
   .member-bgm-zone .s { font-size: 12px; color: rgba(200, 190, 255, 0.55); }
+  /* BGM playlist mode selector (radio row) */
+  .bgm-modes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    align-items: center;
+  }
+  .bgm-modes label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .bgm-modes input[type="radio"] { accent-color: #caa260; }
 
   /* Member photo gallery (read + add + delete) */
   .member-photo-grid {
@@ -4281,20 +4297,26 @@
       <div id="settingsCheck" class="check-list"></div>
     </div>
 
-    <!-- Member-only: BGM upload + photo gallery -->
+    <!-- Member-only: BGM playlist + photo gallery -->
     <div class="card-box pipe-member-only" id="memberBgmCard">
-      <h3>🎵 배경 음악</h3>
-      <p class="muted">최종 합성 영상에 깔릴 음악 파일을 업로드하세요 (mp3, m4a, wav 등 · 최대 ~10MB).</p>
+      <h3>🎵 배경 음악 (플레이리스트)</h3>
+      <p class="muted">여러 곡을 등록할 수 있어요. 최종 영상 재생 시 선택한 모드대로 동시 재생됩니다 (mp3, m4a, wav 등 · 곡당 최대 ~10MB).</p>
       <div class="member-bgm-zone" id="memberBgmDrop">
         <div class="ic">🎼</div>
-        <div class="t">음악 파일을 드래그하거나 클릭</div>
-        <div class="s" id="memberBgmStatus">아직 업로드된 음악이 없습니다</div>
+        <div class="t">＋ 음악 추가 (여러 파일 한 번에 가능)</div>
       </div>
-      <input type="file" id="memberBgmInput" accept="audio/*" style="display:none" />
-      <audio id="memberBgmPreview" controls style="width:100%; margin-top:10px; display:none"></audio>
-      <div style="text-align:right; margin-top:8px">
-        <button class="btn ghost sm" id="memberBgmClearBtn" style="display:none">✕ 삭제</button>
+      <input type="file" id="memberBgmInput" accept="audio/*" multiple style="display:none" />
+      <div id="memberBgmList" style="margin-top:10px"></div>
+      <div id="memberBgmModeRow" style="margin-top:14px; padding:10px 12px; background:rgba(255,255,255,0.04); border-radius:8px; display:none">
+        <div style="font-size:13px; opacity:.85; margin-bottom:6px">재생 모드</div>
+        <div class="bgm-modes">
+          <label><input type="radio" name="bgmMode" value="loop-all"> <span>전체 반복</span></label>
+          <label><input type="radio" name="bgmMode" value="shuffle"> <span>랜덤</span></label>
+          <label><input type="radio" name="bgmMode" value="once"> <span>순차 1회</span></label>
+          <label><input type="radio" name="bgmMode" value="single"> <span>한 곡 반복</span></label>
+        </div>
       </div>
+      <audio id="memberBgmPreview" preload="none" style="display:none"></audio>
     </div>
 
     <div class="card-box pipe-member-only" id="memberPhotoCard">
@@ -9992,6 +10014,9 @@ let backgrounds  = store.get('backgrounds', { 1:null, 2:null });        // {1: d
 let frameData    = store.get('frameData', {});                          // {preset: [{visible, bg, prompt} x6]}
 let videoData    = store.get('videoData', {});                          // {preset: {slots:[clipIdx], clips:[{first,last,dur,prompt}]}}
 let bgmData      = store.get('bgmData', {});                            // {preset: [{name, dataUrl}]}
+// Playback mode per preset for the member BGM playlist.
+// values: 'loop-all' | 'shuffle' | 'once' | 'single'
+let bgmModeData  = store.get('bgmModeData', {});
 let aiKeys       = store.get('aiKeys', {
   gemini:{ model:'gemini-2.5-flash-image-preview', key:'' },
   kling: { model:'kling-v2-pro', access:'', secret:'' }
@@ -14827,24 +14852,23 @@ async function initPipelinePage(){
   // These cards are hidden for admins by CSS so calling them is safe.
   if (typeof wireMemberBgmCard === 'function')   wireMemberBgmCard();
   if (typeof renderMemberPhotoGrid === 'function') renderMemberPhotoGrid();
+  // Sync the BGM playlist with the final-video <video> element so audio
+  // plays alongside the video without being embedded in the mp4.
+  if (typeof wireMemberBgmSync === 'function')   wireMemberBgmSync();
 }
 
 /* ============================================================
    MEMBER-ONLY PIPELINE CARDS (BGM upload + photo gallery)
 ============================================================ */
 
-// Bind once: dropzone click / drag-drop / file picker / clear-btn
+// Bind once: dropzone click / drag-drop / file picker / mode radios
 let _memberBgmBound = false;
 function wireMemberBgmCard(){
   const drop   = document.getElementById('memberBgmDrop');
   const input  = document.getElementById('memberBgmInput');
-  const audio  = document.getElementById('memberBgmPreview');
-  const status = document.getElementById('memberBgmStatus');
-  const clear  = document.getElementById('memberBgmClearBtn');
-  if (!drop || !input || !audio || !status || !clear) return;
+  if (!drop || !input) return;
 
-  // Refresh display from existing bgmData for the current preset
-  refreshMemberBgmDisplay();
+  renderMemberBgmList();
 
   if (_memberBgmBound) return;
   _memberBgmBound = true;
@@ -14855,94 +14879,244 @@ function wireMemberBgmCard(){
   drop.addEventListener('dragleave', () => drop.classList.remove('dragging'));
   drop.addEventListener('drop', e => {
     e.preventDefault(); drop.classList.remove('dragging');
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleMemberBgmFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files) handleMemberBgmFiles(e.dataTransfer.files);
   });
   input.addEventListener('change', () => {
-    if (input.files && input.files[0]) handleMemberBgmFile(input.files[0]);
+    if (input.files && input.files.length) handleMemberBgmFiles(input.files);
     input.value = '';
   });
-  clear.addEventListener('click', clearMemberBgm);
+  // Mode radios — save on change
+  document.querySelectorAll('input[name="bgmMode"]').forEach(r => {
+    r.addEventListener('change', () => {
+      const preset = pipelineState.preset || '활기찬';
+      bgmModeData[preset] = r.value;
+      store.set('bgmModeData', bgmModeData);
+    });
+  });
 }
 
-async function handleMemberBgmFile(file){
-  if (!file || !file.type.startsWith('audio/')) {
-    flashToast('오디오 파일만 업로드할 수 있습니다');
-    return;
+async function handleMemberBgmFiles(fileList){
+  // Accept multiple at once. Each gets validated independently.
+  const preset = pipelineState.preset || '활기찬';
+  if (!bgmData[preset]) bgmData[preset] = [];
+  let added = 0;
+  for (const file of Array.from(fileList)) {
+    if (!file || !file.type.startsWith('audio/')) {
+      flashToast(`'${file?.name||'?'}' 은 오디오 파일이 아닙니다`);
+      continue;
+    }
+    const sizeMB = file.size / 1024 / 1024;
+    if (sizeMB > 12) {
+      flashToast(`'${file.name}' 너무 큽니다 (${sizeMB.toFixed(1)}MB) — 10MB 이하 권장`);
+      continue;
+    }
+    try {
+      const idbKey = `bgm_${preset}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      await idb.put(idbKey, file);
+      bgmData[preset].push({
+        name: file.name,
+        size: file.size,
+        idbKey,
+        addedAt: Date.now()
+      });
+      added++;
+    } catch(e){
+      console.error('[bgm upload]', file.name, e);
+      flashToast(`'${file.name}' 업로드 실패`);
+    }
   }
-  const sizeMB = file.size / 1024 / 1024;
-  if (sizeMB > 12) {
-    flashToast(`파일이 너무 큽니다 (${sizeMB.toFixed(1)}MB) — 10MB 이하 권장`);
+  if (added > 0) {
+    store.set('bgmData', bgmData);
+    flashToast(`🎵 ${added}곡 추가됨`);
+    renderMemberBgmList();
+  }
+}
+
+async function removeMemberBgmTrack(idbKey){
+  if (!confirm('이 곡을 삭제할까요?')) return;
+  const preset = pipelineState.preset || '활기찬';
+  const list = bgmData[preset] || [];
+  const idx = list.findIndex(t => t.idbKey === idbKey);
+  if (idx === -1) return;
+  try { await idb.del(idbKey); } catch(_){}
+  list.splice(idx, 1);
+  store.set('bgmData', bgmData);
+  renderMemberBgmList();
+  flashToast('곡이 삭제되었습니다');
+}
+window.removeMemberBgmTrack = removeMemberBgmTrack;
+
+async function previewMemberBgmTrack(idbKey){
+  const audio = document.getElementById('memberBgmPreview');
+  if (!audio) return;
+  // If already playing this track, toggle pause/play
+  if (audio.dataset.activeKey === idbKey && !audio.paused) {
+    audio.pause();
+    renderMemberBgmList();  // refresh play/pause icons
     return;
   }
   try {
-    const preset = pipelineState.preset || '활기찬';
-    if (!bgmData[preset]) bgmData[preset] = [];
-    // Replace member's existing BGM (single-slot UX, simpler than admin list)
-    // Remove old entry's idb blob if any
-    for (const old of bgmData[preset]) {
-      if (old.idbKey) { try { await idb.del(old.idbKey); } catch(_){} }
+    const blob = await idb.get(idbKey);
+    if (!blob) { flashToast('파일을 찾을 수 없습니다'); return; }
+    if (audio.dataset.activeKey !== idbKey) {
+      try { URL.revokeObjectURL(audio.src); } catch(_){}
+      audio.src = URL.createObjectURL(blob);
+      audio.dataset.activeKey = idbKey;
     }
-    const idbKey = `bgm_${preset}_${Date.now()}`;
-    // idb only exposes put/get/del/list (no `set`) — using set() always threw
-    // TypeError so member BGM uploads never persisted.
-    await idb.put(idbKey, file);
-    bgmData[preset] = [{
-      name: file.name,
-      size: file.size,
-      idbKey,
-      addedAt: Date.now()
-    }];
-    store.set('bgmData', bgmData);
-    flashToast(`🎵 ${file.name} 등록 완료`);
-    refreshMemberBgmDisplay();
+    await audio.play();
+    renderMemberBgmList();
   } catch(e){
-    console.error('[member bgm upload] failed:', e);
-    flashToast('음악 업로드에 실패했습니다');
+    console.warn('[bgm preview]', e);
+    flashToast('재생 실패');
   }
 }
+window.previewMemberBgmTrack = previewMemberBgmTrack;
 
-async function clearMemberBgm(){
-  if (!confirm('등록된 음악을 삭제할까요?')) return;
+function renderMemberBgmList(){
+  const listEl = document.getElementById('memberBgmList');
+  const modeRow = document.getElementById('memberBgmModeRow');
+  if (!listEl) return;
   const preset = pipelineState.preset || '활기찬';
   const list = bgmData[preset] || [];
-  for (const old of list) {
-    if (old.idbKey) { try { await idb.del(old.idbKey); } catch(_){} }
-  }
-  bgmData[preset] = [];
-  store.set('bgmData', bgmData);
-  refreshMemberBgmDisplay();
-  flashToast('음악이 삭제되었습니다');
-}
+  const audio = document.getElementById('memberBgmPreview');
+  const activeKey = audio?.dataset.activeKey || null;
+  const isPlaying = audio && !audio.paused && activeKey;
 
-async function refreshMemberBgmDisplay(){
-  const audio  = document.getElementById('memberBgmPreview');
-  const status = document.getElementById('memberBgmStatus');
-  const clear  = document.getElementById('memberBgmClearBtn');
-  if (!audio || !status || !clear) return;
-  const preset = pipelineState.preset || '활기찬';
-  const list = bgmData[preset] || [];
   if (list.length === 0) {
-    status.textContent = '아직 업로드된 음악이 없습니다';
-    audio.style.display = 'none';
-    audio.removeAttribute('src');
-    clear.style.display = 'none';
+    listEl.innerHTML = '<div style="padding:14px; text-align:center; opacity:.55; font-size:13px">아직 업로드된 음악이 없습니다</div>';
+    if (modeRow) modeRow.style.display = 'none';
     return;
   }
-  const item = list[0];
-  status.textContent = `🎵 ${item.name}` + (item.size ? `  (${(item.size/1024/1024).toFixed(1)} MB)` : '');
-  clear.style.display = 'inline-block';
-  if (item.idbKey) {
-    try {
-      const blob = await idb.get(item.idbKey);
-      if (blob) {
-        audio.src = URL.createObjectURL(blob);
-        audio.style.display = 'block';
-        return;
-      }
-    } catch(_) {}
+  if (modeRow) modeRow.style.display = 'block';
+
+  listEl.innerHTML = list.map((t, i) => {
+    const playing = (activeKey === t.idbKey && isPlaying);
+    const icon = playing ? '⏸' : '▶';
+    const mb = t.size ? `${(t.size/1024/1024).toFixed(1)} MB` : '';
+    return `
+      <div class="bgm-track" style="display:flex; align-items:center; gap:10px; padding:8px 10px; background:rgba(255,255,255,0.04); border-radius:6px; margin-bottom:6px">
+        <div style="min-width:22px; text-align:center; opacity:.55; font-size:12px">${i+1}</div>
+        <button type="button" class="btn ghost sm" onclick="previewMemberBgmTrack('${t.idbKey}')" style="padding:4px 10px; min-width:36px" title="미리듣기/일시정지">${icon}</button>
+        <div style="flex:1; min-width:0">
+          <div style="font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">🎵 ${escapeHtml(t.name)}</div>
+          <div style="font-size:11px; opacity:.5">${mb}</div>
+        </div>
+        <button type="button" class="btn ghost sm" onclick="removeMemberBgmTrack('${t.idbKey}')" style="padding:4px 10px" title="삭제">✕</button>
+      </div>`;
+  }).join('');
+
+  // Sync the mode radios with stored value
+  const mode = (bgmModeData && bgmModeData[preset]) || 'loop-all';
+  const radio = document.querySelector(`input[name="bgmMode"][value="${mode}"]`);
+  if (radio) radio.checked = true;
+
+  // Wire audio onended handler — re-render so play→pause icon swaps back
+  if (audio && !audio.dataset.endedBound) {
+    audio.dataset.endedBound = '1';
+    audio.addEventListener('ended', () => renderMemberBgmList());
+    audio.addEventListener('pause', () => renderMemberBgmList());
+    audio.addEventListener('play', () => renderMemberBgmList());
   }
-  audio.style.display = 'none';
 }
+
+// Backwards-compat shim — older code paths might still call this name.
+async function refreshMemberBgmDisplay(){
+  renderMemberBgmList();
+}
+
+// ============================================================
+//  Sync BGM playlist with final-video playback (no compose embed)
+//  - When the result <video> plays, start the BGM player.
+//  - Mode controls what gets played:
+//    'loop-all' : list order, loop forever
+//    'shuffle'  : Fisher–Yates shuffle, then loop
+//    'once'     : list order, stop after the last track
+//    'single'   : whichever track was last clicked (or [0]) on repeat
+// ============================================================
+let _memberBgmSyncBound = false;
+function wireMemberBgmSync(){
+  const video = document.getElementById('resultVideo');
+  const audio = document.getElementById('memberBgmPreview');
+  if (!video || !audio || _memberBgmSyncBound) return;
+  _memberBgmSyncBound = true;
+
+  let queue = [];      // array of {idbKey, ...} in play order
+  let pos = 0;
+  let mode = 'loop-all';
+
+  async function buildQueue(){
+    const preset = pipelineState.preset || '활기찬';
+    const list = (bgmData[preset] || []).slice();
+    mode = (bgmModeData && bgmModeData[preset]) || 'loop-all';
+    if (list.length === 0) return [];
+    if (mode === 'shuffle') {
+      for (let i = list.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [list[i], list[j]] = [list[j], list[i]];
+      }
+    } else if (mode === 'single') {
+      // Use whichever track was last previewed, else first
+      const activeKey = audio.dataset.activeKey;
+      const single = list.find(t => t.idbKey === activeKey) || list[0];
+      return single ? [single] : [];
+    }
+    return list;
+  }
+
+  async function loadAt(idx){
+    if (idx < 0 || idx >= queue.length) return false;
+    try {
+      const blob = await idb.get(queue[idx].idbKey);
+      if (!blob) return false;
+      try { URL.revokeObjectURL(audio.src); } catch(_){}
+      audio.src = URL.createObjectURL(blob);
+      audio.dataset.activeKey = queue[idx].idbKey;
+      audio.dataset.queueIdx = String(idx);
+      return true;
+    } catch(e){ console.warn('[bgm-sync loadAt]', e); return false; }
+  }
+
+  video.addEventListener('play', async () => {
+    queue = await buildQueue();
+    if (queue.length === 0) return;
+    pos = 0;
+    if (await loadAt(pos)) {
+      try { await audio.play(); } catch(_){}
+    }
+  });
+  video.addEventListener('pause', () => {
+    if (!audio.paused) audio.pause();
+  });
+  video.addEventListener('seeked', () => {
+    // Reset audio to start when user scrubs the video
+    if (audio.src) { audio.currentTime = 0; }
+  });
+  audio.addEventListener('ended', async () => {
+    // Only auto-advance while the video is still playing
+    if (video.paused || video.ended) return;
+    if (mode === 'single') {
+      audio.currentTime = 0;
+      try { await audio.play(); } catch(_){}
+      return;
+    }
+    pos++;
+    if (pos < queue.length) {
+      if (await loadAt(pos)) { try { await audio.play(); } catch(_){} }
+    } else if (mode === 'loop-all' || mode === 'shuffle') {
+      // Rebuild for shuffle (new random order each loop)
+      queue = await buildQueue();
+      pos = 0;
+      if (await loadAt(pos)) { try { await audio.play(); } catch(_){} }
+    }
+    // mode === 'once' just stops at the end
+  });
+}
+
+function escapeHtml(s){
+  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// (Earlier single-slot BGM helper retired in favor of the playlist UI above.)
 
 // Photo grid: shows the same pipelineState.refPhotos data, with delete + add
 function renderMemberPhotoGrid(){
