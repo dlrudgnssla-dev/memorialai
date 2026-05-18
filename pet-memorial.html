@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="build" content="5842bb2-track-picker" />
+<meta name="build" content="c4aed0d-mem-bgm-overlay" />
 <title>MEMORIAL · Cinematic AI Tribute Videos</title>
 <script>
   // Build marker — printed on every page load so we can verify in the
   // browser console whether the user has the latest code or a cached
   // version. If you see this comment but no log, the page is stale.
-  console.log('%c[MEMORIAL] build=5842bb2-track-picker', 'color:#caa260;font-weight:600;background:#1a0f00;padding:2px 6px;border-radius:4px');
+  console.log('%c[MEMORIAL] build=c4aed0d-mem-bgm-overlay', 'color:#caa260;font-weight:600;background:#1a0f00;padding:2px 6px;border-radius:4px');
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -3499,13 +3499,13 @@
   /* Hide iOS Safari's native ▶ play-button overlay that appears when
      autoplay is blocked. Multiple selectors because iOS keeps moving
      them around between versions. */
-  .mem-final-stage video:not([controls])::-webkit-media-controls,
-  .mem-final-stage video:not([controls])::-webkit-media-controls-panel,
-  .mem-final-stage video:not([controls])::-webkit-media-controls-enclosure,
-  .mem-final-stage video:not([controls])::-webkit-media-controls-overlay-enclosure,
-  .mem-final-stage video:not([controls])::-webkit-media-controls-overlay-play-button,
-  .mem-final-stage video:not([controls])::-webkit-media-controls-start-playback-button,
-  .mem-final-stage video:not([controls])::-webkit-media-text-track-container {
+  .mem-final-stage video::-webkit-media-controls,
+  .mem-final-stage video::-webkit-media-controls-panel,
+  .mem-final-stage video::-webkit-media-controls-enclosure,
+  .mem-final-stage video::-webkit-media-controls-overlay-enclosure,
+  .mem-final-stage video::-webkit-media-controls-overlay-play-button,
+  .mem-final-stage video::-webkit-media-controls-start-playback-button,
+  .mem-final-stage video::-webkit-media-text-track-container {
     display: none !important;
     -webkit-appearance: none !important;
     opacity: 0 !important;
@@ -3513,19 +3513,60 @@
     pointer-events: none !important;
     width: 0 !important; height: 0 !important;
   }
-  /* In fullscreen the user can ASK for controls (we add the attribute
-     dynamically in JS). Restore the native controls panel by reversing
-     the hide above. */
-  .mem-final-stage video[controls]::-webkit-media-controls,
-  .mem-final-stage video[controls]::-webkit-media-controls-panel,
-  .mem-final-stage video[controls]::-webkit-media-controls-enclosure {
-    display: flex !important;
-    -webkit-appearance: media-controls !important;
-    opacity: 1 !important;
-    visibility: visible !important;
-    pointer-events: auto !important;
-    width: auto !important; height: auto !important;
+
+  /* Member carousel fullscreen — show the custom BGM overlay below the
+     looping video. Inject is done by attachMemberBgmOverlay() in JS. */
+  .mem-final-stage:fullscreen,
+  .mem-final-stage:-webkit-full-screen {
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: none;
   }
+  .mem-final-stage.mfs-show-controls:fullscreen,
+  .mem-final-stage.mfs-show-controls:-webkit-full-screen { cursor: default; }
+  .mem-final-stage:fullscreen video,
+  .mem-final-stage:-webkit-full-screen video {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    background: #000;
+  }
+  .mfs-bgm-overlay {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    width: min(720px, 92vw);
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+    color: #fff;
+    z-index: 10;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s ease;
+  }
+  .mem-final-stage.mfs-show-controls .mfs-bgm-overlay {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .mfs-bgm-overlay button {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .mfs-bgm-overlay button:hover { background: rgba(255, 255, 255, 0.16); }
+  .mfs-bgm-overlay button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .mfs-bgm-overlay input[type="range"] { accent-color: #caa260; }
   .mem-final-stage video {
     width: 100%; height: 100%;
     object-fit: contain;
@@ -8693,30 +8734,274 @@ function _memSlotClick(e){
     return;
   }
   const v = slot.querySelector('video');
-  if (!v) return;
+  const stage = slot.querySelector('.mem-final-stage');
+  if (!v || !stage) return;
   const isFs = document.fullscreenElement || document.webkitFullscreenElement;
   if (isFs) {
     (document.exitFullscreen || document.webkitExitFullscreen).call(document);
   } else {
-    // Show native browser controls (play/pause, seek, volume) ONLY while
-    // in fullscreen so the carousel thumbnail stays clean. We attach a
-    // one-shot listener that strips the attribute when fullscreen exits.
-    try { v.setAttribute('controls', ''); } catch(_){}
-    const cleanup = () => {
-      const stillFs = document.fullscreenElement || document.webkitFullscreenElement;
-      if (!stillFs) {
-        try { v.removeAttribute('controls'); } catch(_){}
-        document.removeEventListener('fullscreenchange', cleanup);
-        document.removeEventListener('webkitfullscreenchange', cleanup);
-      }
-    };
-    document.addEventListener('fullscreenchange', cleanup);
-    document.addEventListener('webkitfullscreenchange', cleanup);
-    const req = v.requestFullscreen || v.webkitRequestFullscreen ||
-                v.webkitEnterFullscreen;
-    if (req) req.call(v);
-    try { v.muted = false; } catch(_){}
+    // Fullscreen the STAGE (not the bare <video>) so we can render the
+    // custom BGM overlay player on top of the video. Native controls
+    // remain hidden — our overlay drives playback timeline + tracks.
+    attachMemberBgmOverlay(stage, id);
+    const req = stage.requestFullscreen || stage.webkitRequestFullscreen;
+    if (req) {
+      try { req.call(stage); } catch(_){}
+    } else {
+      // Safari iOS only supports video.webkitEnterFullscreen — fall back
+      // to that and accept native controls (no overlay available).
+      try { (v.webkitEnterFullscreen||(()=>{})).call(v); v.muted = false; } catch(_){}
+    }
   }
+}
+
+// ============================================================
+//  Member-carousel BGM overlay (used in fullscreen mode)
+//  Renders a floating player on top of the looping video, wired to
+//  the BGM playlist for that target's preset. Auto-hides on idle,
+//  reveals on user activity, hides on background tap.
+// ============================================================
+let _memBgmOverlayBound = false;
+function attachMemberBgmOverlay(stage, targetId){
+  if (!stage) return;
+  const t = targets.find(x => String(x.id) === String(targetId));
+  if (!t) return;
+  const preset = t.preset || '활기찬';
+  const tracks = (bgmData[preset] || []).slice();
+  const mode = (bgmModeData && bgmModeData[preset]) || 'loop-all';
+
+  // Build (or reuse) the overlay DOM inside the stage
+  let overlay = stage.querySelector('.mfs-bgm-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'mfs-bgm-overlay';
+    overlay.innerHTML = `
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
+        <button data-act="prev" title="이전 곡" style="min-width:42px">⏮</button>
+        <button data-act="play" title="재생/일시정지" style="min-width:54px; font-size:16px">▶</button>
+        <button data-act="next" title="다음 곡" style="min-width:42px">⏭</button>
+        <button data-act="title" style="flex:1; text-align:left; font-size:13px; opacity:.9; padding:6px 8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">곡 선택</button>
+        <div data-role="count" style="font-size:11px; opacity:.55; white-space:nowrap"></div>
+      </div>
+      <div style="display:flex; align-items:center; gap:10px">
+        <span data-role="time" style="font-size:11px; opacity:.6; min-width:34px; text-align:right">0:00</span>
+        <input data-act="seek" type="range" min="0" max="0" value="0" step="0.1" style="flex:1; cursor:pointer">
+        <span data-role="dur" style="font-size:11px; opacity:.6; min-width:34px">0:00</span>
+      </div>
+      <div data-role="picker" style="display:none; position:absolute; left:14px; right:14px; bottom:calc(100% + 6px); max-height:280px; overflow-y:auto; background:#1a1014; border:1px solid rgba(255,255,255,0.12); border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,0.5); z-index:11"></div>`;
+    stage.appendChild(overlay);
+  }
+
+  // Dedicated audio element (one per stage)
+  let audio = stage.querySelector('audio.mfs-bgm-audio');
+  if (!audio) {
+    audio = document.createElement('audio');
+    audio.className = 'mfs-bgm-audio';
+    audio.preload = 'auto';
+    audio.style.display = 'none';
+    stage.appendChild(audio);
+  }
+
+  const video = stage.querySelector('video');
+  const btnPrev = overlay.querySelector('[data-act="prev"]');
+  const btnPlay = overlay.querySelector('[data-act="play"]');
+  const btnNext = overlay.querySelector('[data-act="next"]');
+  const btnTitle= overlay.querySelector('[data-act="title"]');
+  const seekEl  = overlay.querySelector('[data-act="seek"]');
+  const timeEl  = overlay.querySelector('[data-role="time"]');
+  const durEl   = overlay.querySelector('[data-role="dur"]');
+  const countEl = overlay.querySelector('[data-role="count"]');
+  const picker  = overlay.querySelector('[data-role="picker"]');
+
+  // State
+  let queue = tracks.slice();
+  let pos = 0;
+  let seekingByUser = false;
+  if (mode === 'shuffle') {
+    for (let i = queue.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [queue[i], queue[j]] = [queue[j], queue[i]];
+    }
+  } else if (mode === 'single') {
+    queue = queue.length > 0 ? [queue[0]] : [];
+  }
+
+  function fmt(t){
+    if (!Number.isFinite(t) || t < 0) return '0:00';
+    const m = Math.floor(t/60), s = Math.floor(t%60).toString().padStart(2,'0');
+    return `${m}:${s}`;
+  }
+  function refresh(){
+    const cur = queue[pos];
+    btnTitle.textContent = cur ? `🎵 ${cur.name}` : '등록된 음악이 없습니다';
+    countEl.textContent = queue.length > 0 ? `(${pos+1}/${queue.length})` : '';
+    btnPlay.textContent = (!audio.paused) ? '⏸' : '▶';
+    const navOk = queue.length > 1 && mode !== 'single';
+    btnPrev.disabled = !navOk;
+    btnNext.disabled = !navOk;
+    btnPlay.disabled = queue.length === 0;
+    if (!seekingByUser) {
+      seekEl.max = Number.isFinite(audio.duration) ? audio.duration : 0;
+      seekEl.value = audio.currentTime || 0;
+    }
+    timeEl.textContent = fmt(audio.currentTime);
+    durEl.textContent  = fmt(audio.duration);
+  }
+  async function loadAt(idx){
+    if (idx < 0 || idx >= queue.length) return false;
+    try {
+      const blob = await idb.get(queue[idx].idbKey);
+      if (!blob) return false;
+      try { URL.revokeObjectURL(audio.src); } catch(_){}
+      audio.src = URL.createObjectURL(blob);
+      pos = idx;
+      return true;
+    } catch(_){ return false; }
+  }
+  async function startPlayback(){
+    if (queue.length === 0) {
+      // No music → just play the video looping with sound off
+      try { await video.play(); } catch(_){}
+      return;
+    }
+    if (!audio.src) { if (!(await loadAt(pos))) return; }
+    try { await audio.play(); } catch(_){}
+    try { await video.play(); } catch(_){}
+  }
+  async function nextTrack(auto){
+    if (queue.length === 0) return;
+    if (mode === 'single') {
+      audio.currentTime = 0;
+      try { await audio.play(); } catch(_){}
+      return;
+    }
+    let np = pos + 1;
+    if (np >= queue.length) {
+      if (mode === 'once' && auto) { audio.pause(); video.pause(); refresh(); return; }
+      np = 0;
+      if (mode === 'shuffle') {
+        for (let i = queue.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [queue[i], queue[j]] = [queue[j], queue[i]];
+        }
+      }
+    }
+    if (await loadAt(np)) { try { await audio.play(); } catch(_){} }
+  }
+  async function prevTrack(){
+    if (queue.length === 0 || mode === 'single') return;
+    if (audio.currentTime > 3) { audio.currentTime = 0; return; }
+    let pp = pos - 1;
+    if (pp < 0) pp = queue.length - 1;
+    if (await loadAt(pp)) { try { await audio.play(); } catch(_){} }
+  }
+  function showPicker(){
+    if (queue.length === 0) {
+      picker.innerHTML = '<div style="padding:14px; opacity:.55; font-size:13px">등록된 곡이 없습니다</div>';
+    } else {
+      picker.innerHTML = queue.map((t, i) => {
+        const active = (i === pos);
+        const marker = active && !audio.paused ? '▶' : (active ? '◉' : (i+1));
+        const bg = active ? 'background:rgba(202,162,96,0.18);' : '';
+        return `<div data-pos="${i}" style="padding:10px 14px; display:flex; gap:10px; cursor:pointer; ${bg} border-bottom:1px solid rgba(255,255,255,0.05); font-size:13px">
+          <div style="min-width:22px; text-align:center; opacity:.7; font-size:12px">${marker}</div>
+          <div style="flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${escapeHtml(t.name)}</div>
+        </div>`;
+      }).join('');
+      picker.querySelectorAll('[data-pos]').forEach(r => {
+        r.addEventListener('click', async () => {
+          const p = parseInt(r.dataset.pos, 10);
+          if (p !== pos) { if (await loadAt(p)) { try { await audio.play(); } catch(_){} } }
+          else { audio.paused ? startPlayback() : audio.pause(); }
+          hidePicker();
+        });
+      });
+    }
+    picker.style.display = 'block';
+  }
+  function hidePicker(){ picker.style.display = 'none'; }
+
+  // === Bind once per overlay (each call to attach should still wire) ===
+  if (!overlay.dataset.bound) {
+    overlay.dataset.bound = '1';
+    btnPlay.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      audio.paused ? await startPlayback() : audio.pause();
+    });
+    btnPrev.addEventListener('click', (e) => { e.stopPropagation(); prevTrack(); });
+    btnNext.addEventListener('click', (e) => { e.stopPropagation(); nextTrack(false); });
+    btnTitle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      picker.style.display === 'block' ? hidePicker() : showPicker();
+    });
+    seekEl.addEventListener('input', () => {
+      seekingByUser = true;
+      timeEl.textContent = fmt(parseFloat(seekEl.value) || 0);
+    });
+    seekEl.addEventListener('change', () => {
+      if (audio.duration) audio.currentTime = parseFloat(seekEl.value) || 0;
+      seekingByUser = false;
+    });
+    // Prevent button-row clicks from bubbling up to the stage (which would
+    // hide controls). Picker clicks are also internal.
+    overlay.addEventListener('click', e => e.stopPropagation());
+    audio.addEventListener('play',  refresh);
+    audio.addEventListener('pause', refresh);
+    audio.addEventListener('timeupdate', refresh);
+    audio.addEventListener('loadedmetadata', refresh);
+    audio.addEventListener('ended', () => nextTrack(true));
+  }
+
+  // === Stage-level interactivity: auto-hide + tap-background-to-hide ===
+  if (!stage.dataset.bgmOverlayBound) {
+    stage.dataset.bgmOverlayBound = '1';
+    let hideTimer = null;
+    const HIDE_MS = 2500;
+
+    function isFs(){
+      return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+    function showControls(){
+      stage.classList.add('mfs-show-controls');
+      clearTimeout(hideTimer);
+      if (isFs() && !audio.paused) {
+        hideTimer = setTimeout(() => stage.classList.remove('mfs-show-controls'), HIDE_MS);
+      }
+    }
+    function hideControls(){
+      stage.classList.remove('mfs-show-controls');
+      hidePicker();
+      clearTimeout(hideTimer);
+    }
+    // Activity = mouse/touch movement → show controls
+    ['mousemove','touchstart','touchmove'].forEach(ev => {
+      stage.addEventListener(ev, showControls, { passive: true });
+    });
+    // CLICK on the stage BACKGROUND (not on overlay or video) → toggle hide.
+    // Background = the dark area around the contain'd video.
+    stage.addEventListener('click', (e) => {
+      if (e.target.closest('.mfs-bgm-overlay')) return;
+      if (e.target === video) return;            // ignore clicks on video itself
+      // Toggle: if controls visible → hide; else → show
+      if (stage.classList.contains('mfs-show-controls')) hideControls();
+      else showControls();
+    });
+    // Fullscreen change — reveal initially, cleanup on exit
+    function onFsChange(){
+      if (isFs() && document.fullscreenElement === stage) {
+        showControls();
+        // Kick off playback so audio + video start together
+        startPlayback();
+      } else if (!isFs()) {
+        hideControls();
+        audio.pause();
+      }
+    }
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+  }
+
+  refresh();
 }
 
 function _memUpdateSlotClasses(){
@@ -15436,6 +15721,23 @@ function wireMemberBgmSync(){
     // Show controls on any user activity inside the wrapper
     ['mousemove', 'touchstart', 'touchmove', 'keydown'].forEach(ev => {
       wrap.addEventListener(ev, showControls, { passive: true });
+    });
+    // Background click in fullscreen → toggle hide. "Background" = anywhere
+    // outside the player card and outside the video element itself (the
+    // letterboxed dark area when the video doesn't fill the viewport).
+    wrap.addEventListener('click', (e) => {
+      if (!isFs()) return;
+      if (e.target.closest('#resultPlayer')) return;       // ignore clicks on controls
+      if (e.target.closest('#resultOverlayPlay')) return;  // ignore overlay play button
+      if (e.target.closest('#resultFsBtn')) return;        // ignore fs button
+      if (e.target === video) return;                      // ignore the video itself
+      // Hit the letterbox background → toggle controls
+      if (wrap.classList.contains('show-controls')) {
+        wrap.classList.remove('show-controls');
+        clearTimeout(hideTimer);
+      } else {
+        showControls();
+      }
     });
     // Also reveal when audio state changes (so the user can see what happened)
     audio.addEventListener('play',  showControls);
