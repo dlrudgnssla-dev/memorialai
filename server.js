@@ -1144,6 +1144,27 @@ function runFfmpeg(args) {
 }
 
 async function downloadTo(url, dest) {
+  // Local clip-cache URLs (saved Seedance clips) are RELATIVE paths like
+  // /clip-cache/<targetId>/<idx>.mp4. fetch() can't handle relative URLs in
+  // Node — and we don't need an HTTP round-trip anyway since the bytes are
+  // already on local disk. Copy directly instead. Old absolute URLs
+  // (kling-proxy.workers.dev, replicate.delivery, etc.) still go through fetch.
+  if (typeof url === 'string' && url.startsWith('/clip-cache/')) {
+    // Strip query string if present (e.g. ?v=timestamp cache-buster)
+    const cleanPath = url.split('?')[0];
+    // /clip-cache/<targetId>/<filename>
+    const m = cleanPath.match(/^\/clip-cache\/([^/]+)\/(.+)$/);
+    if (m && SAFE_ID.test(m[1]) && /^\d+\.mp4$/.test(m[2])) {
+      const src = path.join(CLIP_CACHE_DIR, m[1], m[2]);
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, dest);
+        const sz = fs.statSync(dest).size;
+        return sz;
+      }
+      throw new Error(`local clip not found: ${src}`);
+    }
+    throw new Error(`bad clip-cache path: ${url}`);
+  }
   const r = await fetch(url, { headers: { 'User-Agent': 'compose-server/1.0' } });
   if (!r.ok) throw new Error(`fetch ${url} → ${r.status}`);
   const buf = Buffer.from(await r.arrayBuffer());
