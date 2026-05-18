@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="build" content="bcdfb13-quad-blend-fix" />
+<meta name="build" content="8d5d469-quad-taller-gap" />
 <title>MEMORIAL · Cinematic AI Tribute Videos</title>
 <script>
   // Build marker — printed on every page load so we can verify in the
   // browser console whether the user has the latest code or a cached
   // version. If you see this comment but no log, the page is stale.
-  console.log('%c[MEMORIAL] build=bcdfb13-quad-blend-fix', 'color:#caa260;font-weight:600;background:#1a0f00;padding:2px 6px;border-radius:4px');
+  console.log('%c[MEMORIAL] build=8d5d469-quad-taller-gap', 'color:#caa260;font-weight:600;background:#1a0f00;padding:2px 6px;border-radius:4px');
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -3593,7 +3593,7 @@
   .vfx-quad-cell {
     position: absolute;
     width: 60%;
-    height: 60%;
+    height: 50%;             /* shorter than wide → N and S more vertically separated */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3608,13 +3608,15 @@
     display: block;
   }
   /* No transform on cell containers — top/right/bottom/left only.
-     Centered along the cross-axis: left = (100-60)/2 = 20% etc. */
+     For width 60% the horizontal offset is (100-60)/2 = 20%.
+     For height 50% the vertical offset is (100-50)/2 = 25%. */
   .vfx-quad-cell.cell-n { top: 0;    left: 20%; }
-  .vfx-quad-cell.cell-e { right: 0;  top: 20%; }
+  .vfx-quad-cell.cell-e { right: 0;  top: 25%; }
   .vfx-quad-cell.cell-s { bottom: 0; left: 20%; }
-  .vfx-quad-cell.cell-w { left: 0;   top: 20%; }
-  /* Adjacent cells overlap at the corners (e.g. N ∩ E spans x=40..80%,
-     y=20..60%) so dogs near cell centers visually touch each other. */
+  .vfx-quad-cell.cell-w { left: 0;   top: 25%; }
+  /* N (0–50% Y) and S (50–100% Y) just touch at the midline — no
+     vertical overlap, more breathing room between top and bottom dogs.
+     E/W still overlap with N/S near the corners. */
   .vfx-quad-cell.cell-n video { transform: rotate(0deg);   }
   .vfx-quad-cell.cell-e video { transform: rotate(90deg);  }
   .vfx-quad-cell.cell-s video { transform: rotate(180deg); }
