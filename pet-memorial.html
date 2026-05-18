@@ -4384,8 +4384,31 @@
         <button class="btn ghost sm" id="rerunComposeBtn">↻ 합성만 다시</button>
       </div>
       <div id="composeStatus" class="muted"></div>
-      <div class="video-frame" style="margin-top:16px; aspect-ratio:16/9; max-width:780px">
-        <video id="resultVideo" controls style="width:100%; height:100%; background:#000; border-radius:12px"></video>
+      <!-- Video loops silently in the background while the BGM playlist drives playback.
+           Native controls are hidden — see #resultPlayer below for the custom audio bar. -->
+      <div class="video-frame" style="margin-top:16px; aspect-ratio:16/9; max-width:780px; position:relative">
+        <video id="resultVideo" loop muted playsinline preload="auto"
+               style="width:100%; height:100%; background:#000; border-radius:12px; object-fit:contain"></video>
+        <button id="resultOverlayPlay" type="button"
+                title="재생"
+                style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.25); border:0; border-radius:12px; cursor:pointer; color:#fff; font-size:54px; opacity:0.8; transition:opacity .15s; pointer-events:none">
+          <span id="resultOverlayPlayIcon">▶</span>
+        </button>
+      </div>
+      <!-- Custom audio-driven player bar (controls the BGM playlist) -->
+      <div id="resultPlayer" class="result-player" style="margin-top:12px; max-width:780px; padding:10px 14px; background:rgba(255,255,255,0.04); border-radius:10px">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px">
+          <button id="rpPrev" type="button" class="btn ghost sm" title="이전 곡" style="padding:6px 12px; min-width:42px">⏮</button>
+          <button id="rpPlay" type="button" class="btn sm" title="재생/일시정지" style="padding:6px 16px; min-width:54px; font-size:16px">▶</button>
+          <button id="rpNext" type="button" class="btn ghost sm" title="다음 곡" style="padding:6px 12px; min-width:42px">⏭</button>
+          <div id="rpTitle" style="flex:1; min-width:0; font-size:13px; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">음악을 등록하면 여기에 표시됩니다</div>
+          <div id="rpCount" style="font-size:11px; opacity:.55; white-space:nowrap"></div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px">
+          <span id="rpTime" style="font-size:11px; opacity:.6; min-width:34px; text-align:right">0:00</span>
+          <input id="rpSeek" type="range" min="0" max="0" value="0" step="0.1" style="flex:1; accent-color:#caa260; cursor:pointer">
+          <span id="rpDur"  style="font-size:11px; opacity:.6; min-width:34px">0:00</span>
+        </div>
       </div>
       <div class="result-actions" style="margin-top:16px">
         <button class="btn" id="dlVideoBtn">⬇ 영상 다운로드</button>
@@ -14885,12 +14908,13 @@ function wireMemberBgmCard(){
     if (input.files && input.files.length) handleMemberBgmFiles(input.files);
     input.value = '';
   });
-  // Mode radios — save on change
+  // Mode radios — save on change + rebuild player queue
   document.querySelectorAll('input[name="bgmMode"]').forEach(r => {
     r.addEventListener('change', () => {
       const preset = pipelineState.preset || '활기찬';
       bgmModeData[preset] = r.value;
       store.set('bgmModeData', bgmModeData);
+      if (typeof wireMemberBgmSync === 'function') wireMemberBgmSync();
     });
   });
 }
@@ -14929,6 +14953,8 @@ async function handleMemberBgmFiles(fileList){
     store.set('bgmData', bgmData);
     flashToast(`🎵 ${added}곡 추가됨`);
     renderMemberBgmList();
+    // Rebuild the player queue so newly added tracks become reachable
+    if (typeof wireMemberBgmSync === 'function') wireMemberBgmSync();
   }
 }
 
@@ -14942,6 +14968,8 @@ async function removeMemberBgmTrack(idbKey){
   list.splice(idx, 1);
   store.set('bgmData', bgmData);
   renderMemberBgmList();
+  // Refresh the result-page player queue too
+  if (typeof wireMemberBgmSync === 'function') wireMemberBgmSync();
   flashToast('곡이 삭제되었습니다');
 }
 window.removeMemberBgmTrack = removeMemberBgmTrack;
@@ -15025,9 +15053,10 @@ async function refreshMemberBgmDisplay(){
 }
 
 // ============================================================
-//  Sync BGM playlist with final-video playback (no compose embed)
-//  - When the result <video> plays, start the BGM player.
-//  - Mode controls what gets played:
+//  Final-video player — AUDIO-DRIVEN.
+//  The video loops silently in the background; the BGM playlist
+//  is the actual playback timeline (with seek/prev/next controls).
+//  Modes:
 //    'loop-all' : list order, loop forever
 //    'shuffle'  : Fisher–Yates shuffle, then loop
 //    'once'     : list order, stop after the last track
@@ -15035,32 +15064,89 @@ async function refreshMemberBgmDisplay(){
 // ============================================================
 let _memberBgmSyncBound = false;
 function wireMemberBgmSync(){
-  const video = document.getElementById('resultVideo');
-  const audio = document.getElementById('memberBgmPreview');
-  if (!video || !audio || _memberBgmSyncBound) return;
+  const video       = document.getElementById('resultVideo');
+  const audio       = document.getElementById('memberBgmPreview');
+  const playerCard  = document.getElementById('resultPlayer');
+  const overlayBtn  = document.getElementById('resultOverlayPlay');
+  const overlayIcon = document.getElementById('resultOverlayPlayIcon');
+  const btnPrev = document.getElementById('rpPrev');
+  const btnPlay = document.getElementById('rpPlay');
+  const btnNext = document.getElementById('rpNext');
+  const titleEl = document.getElementById('rpTitle');
+  const countEl = document.getElementById('rpCount');
+  const seekEl  = document.getElementById('rpSeek');
+  const timeEl  = document.getElementById('rpTime');
+  const durEl   = document.getElementById('rpDur');
+  if (!video || !audio || !playerCard) return;
+  if (_memberBgmSyncBound) {
+    // Already bound — just refresh queue (e.g. user switched targets)
+    rebuildQueueAndRefresh();
+    return;
+  }
   _memberBgmSyncBound = true;
 
-  let queue = [];      // array of {idbKey, ...} in play order
+  let queue = [];
   let pos = 0;
   let mode = 'loop-all';
+  let seekingByUser = false;
 
-  async function buildQueue(){
+  function fmtTime(t){
+    if (!Number.isFinite(t) || t < 0) return '0:00';
+    const m = Math.floor(t / 60);
+    const s = Math.floor(t % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  }
+  function refreshControls(){
+    const hasQueue = queue.length > 0;
+    const cur = hasQueue ? queue[pos] : null;
+    if (titleEl) titleEl.textContent = cur ? `🎵 ${cur.name}` : '음악을 등록하면 여기에 표시됩니다';
+    if (countEl) countEl.textContent = hasQueue ? `(${pos+1}/${queue.length})` : '';
+    if (btnPlay) btnPlay.textContent = (audio && !audio.paused) ? '⏸' : '▶';
+    // Disable prev/next in single mode or when only 1 track
+    const navOk = hasQueue && mode !== 'single' && queue.length > 1;
+    if (btnPrev) btnPrev.disabled = !navOk;
+    if (btnNext) btnNext.disabled = !navOk;
+    if (btnPlay) btnPlay.disabled = !hasQueue;
+    // Overlay big play button — visible while audio is paused
+    if (overlayBtn) {
+      const paused = !audio || audio.paused;
+      overlayBtn.style.pointerEvents = paused ? 'auto' : 'none';
+      overlayBtn.style.opacity = paused ? '0.85' : '0';
+      if (overlayIcon) overlayIcon.textContent = paused ? '▶' : '';
+    }
+    // Hide whole player card if nothing in queue
+    playerCard.style.opacity = hasQueue ? '1' : '0.55';
+  }
+  function refreshProgress(){
+    if (!seekEl || !timeEl || !durEl) return;
+    const dur = audio.duration || 0;
+    const cur = audio.currentTime || 0;
+    if (!seekingByUser) {
+      seekEl.max = Number.isFinite(dur) ? dur : 0;
+      seekEl.value = cur;
+    }
+    timeEl.textContent = fmtTime(cur);
+    durEl.textContent  = fmtTime(dur);
+  }
+
+  async function rebuildQueueAndRefresh(){
     const preset = pipelineState.preset || '활기찬';
     const list = (bgmData[preset] || []).slice();
     mode = (bgmModeData && bgmModeData[preset]) || 'loop-all';
-    if (list.length === 0) return [];
+    queue = list;
     if (mode === 'shuffle') {
-      for (let i = list.length - 1; i > 0; i--) {
+      for (let i = queue.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [list[i], list[j]] = [list[j], list[i]];
+        [queue[i], queue[j]] = [queue[j], queue[i]];
       }
     } else if (mode === 'single') {
-      // Use whichever track was last previewed, else first
+      // Single-mode queue = [active or first track]
       const activeKey = audio.dataset.activeKey;
       const single = list.find(t => t.idbKey === activeKey) || list[0];
-      return single ? [single] : [];
+      queue = single ? [single] : [];
     }
-    return list;
+    pos = 0;
+    refreshControls();
   }
 
   async function loadAt(idx){
@@ -15072,44 +15158,97 @@ function wireMemberBgmSync(){
       audio.src = URL.createObjectURL(blob);
       audio.dataset.activeKey = queue[idx].idbKey;
       audio.dataset.queueIdx = String(idx);
+      pos = idx;
       return true;
-    } catch(e){ console.warn('[bgm-sync loadAt]', e); return false; }
+    } catch(e){ console.warn('[player loadAt]', e); return false; }
   }
 
-  video.addEventListener('play', async () => {
-    queue = await buildQueue();
-    if (queue.length === 0) return;
-    pos = 0;
-    if (await loadAt(pos)) {
-      try { await audio.play(); } catch(_){}
+  async function startPlayback(){
+    // Always start (or resume) audio. Video loops silently in parallel.
+    if (queue.length === 0) {
+      // No BGM — fall back to just playing video without audio
+      try { video.muted = false; await video.play(); } catch(_){}
+      return;
     }
-  });
-  video.addEventListener('pause', () => {
-    if (!audio.paused) audio.pause();
-  });
-  video.addEventListener('seeked', () => {
-    // Reset audio to start when user scrubs the video
-    if (audio.src) { audio.currentTime = 0; }
-  });
-  audio.addEventListener('ended', async () => {
-    // Only auto-advance while the video is still playing
-    if (video.paused || video.ended) return;
+    if (!audio.src) {
+      if (!(await loadAt(pos))) return;
+    }
+    try { await audio.play(); } catch(_){}
+    try { await video.play(); } catch(_){}
+  }
+
+  async function nextTrack(auto){
+    if (queue.length === 0) return;
     if (mode === 'single') {
       audio.currentTime = 0;
       try { await audio.play(); } catch(_){}
       return;
     }
-    pos++;
-    if (pos < queue.length) {
-      if (await loadAt(pos)) { try { await audio.play(); } catch(_){} }
-    } else if (mode === 'loop-all' || mode === 'shuffle') {
-      // Rebuild for shuffle (new random order each loop)
-      queue = await buildQueue();
-      pos = 0;
-      if (await loadAt(pos)) { try { await audio.play(); } catch(_){} }
+    let nextPos = pos + 1;
+    if (nextPos >= queue.length) {
+      if (mode === 'once' && auto) {
+        // End of playlist — stop everything
+        audio.pause();
+        video.pause();
+        refreshControls();
+        return;
+      }
+      // Loop / shuffle wrap-around — rebuild for shuffle to re-randomize
+      await rebuildQueueAndRefresh();
+      nextPos = 0;
     }
-    // mode === 'once' just stops at the end
+    if (await loadAt(nextPos)) {
+      try { await audio.play(); } catch(_){}
+    }
+  }
+
+  async function prevTrack(){
+    if (queue.length === 0 || mode === 'single') return;
+    // Within first 3s → previous track; else restart current
+    if (audio.currentTime > 3) {
+      audio.currentTime = 0;
+      return;
+    }
+    let prevPos = pos - 1;
+    if (prevPos < 0) prevPos = queue.length - 1;
+    if (await loadAt(prevPos)) {
+      try { await audio.play(); } catch(_){}
+    }
+  }
+
+  // === wire UI ===
+  btnPlay?.addEventListener('click', async () => {
+    if (audio.paused) await startPlayback(); else audio.pause();
   });
+  btnPrev?.addEventListener('click', prevTrack);
+  btnNext?.addEventListener('click', () => nextTrack(false));
+  overlayBtn?.addEventListener('click', startPlayback);
+  seekEl?.addEventListener('input', () => {
+    seekingByUser = true;
+    timeEl.textContent = fmtTime(parseFloat(seekEl.value) || 0);
+  });
+  seekEl?.addEventListener('change', () => {
+    if (audio.duration) audio.currentTime = parseFloat(seekEl.value) || 0;
+    seekingByUser = false;
+  });
+
+  // === audio events ===
+  audio.addEventListener('ended', () => nextTrack(true));
+  audio.addEventListener('play',  () => {
+    // Make sure video is also rolling so visuals don't freeze
+    if (video.paused) { try { video.play(); } catch(_){} }
+    refreshControls();
+  });
+  audio.addEventListener('pause', () => {
+    // Pause video too so visuals freeze with audio
+    if (!video.paused) video.pause();
+    refreshControls();
+  });
+  audio.addEventListener('loadedmetadata', refreshProgress);
+  audio.addEventListener('timeupdate',    refreshProgress);
+
+  // Initial state
+  rebuildQueueAndRefresh();
 }
 
 function escapeHtml(s){
