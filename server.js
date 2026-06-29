@@ -1174,6 +1174,256 @@ app.get(['/pet-memorial.html', '/'], (req, res) => {
   }
 });
 
+// ============================================================
+// Transcription — POST /transcribe
+// Accepts audio as base64 or multipart file upload.
+// Uses OpenAI Whisper API for speech-to-text, then detects
+// "off the record" sections from the timestamped transcript.
+//
+// Request body (JSON):
+//   { audioBase64: string, audioExt?: string, openaiKey: string,
+//     language?: string }
+// OR multipart/form-data:
+//   file: <audio file>, openaiKey: <string>, language?: <string>
+//
+// Response:
+//   { ok: true, text: string, segments: [...], offRecord: [...] }
+// ============================================================
+
+// Keywords that signal an "off the record" section
+const OFF_RECORD_PATTERNS = [
+  /오프\s*더\s*레코드/i,
+  /off[\s-]*the[\s-]*record/i,
+  /녹음\s*(꺼|끄|끊|중단|정지)/i,
+  /녹음\s*하지\s*마/i,
+  /기록\s*(하지\s*마|꺼|끄|안\s*해)/i,
+  /배경\s*(설명|으로|으론)/i,
+  /비공개\s*(로|입니다|야)/i,
+  /이건\s*비밀/i,
+  /공개\s*(하지\s*마|안\s*해)/i,
+  /이\s*부분은\s*빼/i,
+  /빼주세요/i,
+];
+
+// Keywords that signal the end of an off-the-record section
+const ON_RECORD_PATTERNS = [
+  /다시\s*녹음/i,
+  /녹음\s*(켜|시작|재개)/i,
+  /on\s*the\s*record/i,
+  /공개해도/i,
+  /기록해도/i,
+];
+
+function detectOffRecord(segments) {
+  const offRecordSegments = [];
+  let inOffRecord = false;
+  let offStart = null;
+  let triggerText = '';
+
+  for (const seg of segments) {
+    const text = seg.text || '';
+
+    if (!inOffRecord) {
+      for (const pat of OFF_RECORD_PATTERNS) {
+        if (pat.test(text)) {
+          inOffRecord = true;
+          offStart = seg.start;
+          triggerText = text.trim();
+          break;
+        }
+      }
+    } else {
+      // Check if this segment ends the off-record section
+      let ended = false;
+      for (const pat of ON_RECORD_PATTERNS) {
+        if (pat.test(text)) {
+          offRecordSegments.push({
+            start: offStart,
+            end: seg.end,
+            triggerText,
+            endText: text.trim(),
+          });
+          inOffRecord = false;
+          offStart = null;
+          ended = true;
+          break;
+        }
+      }
+      // Auto-close after 5 minutes of off-record content
+      if (!ended && seg.start - offStart > 300) {
+        offRecordSegments.push({
+          start: offStart,
+          end: seg.end,
+          triggerText,
+          endText: '(자동 종료 — 5분 초과)',
+          autoEnded: true,
+        });
+        inOffRecord = false;
+        offStart = null;
+      }
+    }
+  }
+
+  // If still in off-record at end, close it
+  if (inOffRecord && segments.length > 0) {
+    const last = segments[segments.length - 1];
+    offRecordSegments.push({
+      start: offStart,
+      end: last.end,
+      triggerText,
+      endText: '(파일 끝)',
+    });
+  }
+
+  // Also mark individual segments that contain trigger keywords
+  const triggered = segments.filter(seg => {
+    const t = seg.text || '';
+    return OFF_RECORD_PATTERNS.some(p => p.test(t));
+  });
+
+  return { ranges: offRecordSegments, triggeredSegments: triggered };
+}
+
+// Multipart helper using built-in Node streams (no extra deps)
+async function parseMultipartAudio(req) {
+  return new Promise((resolve, reject) => {
+    const boundary = (req.headers['content-type'] || '').match(/boundary=(.+)/)?.[1];
+    if (!boundary) return reject(new Error('no boundary in content-type'));
+    const chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end', () => {
+      const buf = Buffer.concat(chunks);
+      const sep = Buffer.from('--' + boundary);
+      const parts = [];
+      let pos = 0;
+      while (pos < buf.length) {
+        const start = buf.indexOf(sep, pos);
+        if (start === -1) break;
+        const end = buf.indexOf(sep, start + sep.length);
+        const partBuf = end === -1 ? buf.slice(start + sep.length) : buf.slice(start + sep.length, end);
+        const headerEnd = partBuf.indexOf('\r\n\r\n');
+        if (headerEnd !== -1) {
+          const headers = partBuf.slice(0, headerEnd).toString();
+          const body = partBuf.slice(headerEnd + 4, partBuf.length - 2); // trim trailing \r\n
+          parts.push({ headers, body });
+        }
+        pos = end === -1 ? buf.length : end;
+      }
+      resolve(parts);
+    });
+    req.on('error', reject);
+  });
+}
+
+app.post('/transcribe',
+  express.raw({ type: ['application/json', 'multipart/form-data'], limit: '50mb' }),
+  async (req, res) => {
+    try {
+      let audioBuffer, audioExt, openaiKey, language;
+
+      const ct = req.headers['content-type'] || '';
+      if (ct.includes('multipart/form-data')) {
+        // Multipart upload
+        const parts = await parseMultipartAudio(req);
+        for (const p of parts) {
+          const nameMatch = p.headers.match(/name="([^"]+)"/);
+          const name = nameMatch?.[1];
+          if (name === 'file') {
+            audioBuffer = p.body;
+            const fnMatch = p.headers.match(/filename="([^"]+)"/);
+            audioExt = fnMatch?.[1]?.split('.').pop() || 'm4a';
+          } else if (name === 'openaiKey') audioKey = p.body.toString().trim();
+          else if (name === 'language') language = p.body.toString().trim();
+        }
+        openaiKey = audioKey;
+      } else {
+        // JSON body
+        let body;
+        try { body = JSON.parse(req.body?.toString() || req.body); } catch { body = req.body || {}; }
+        if (Buffer.isBuffer(req.body)) body = JSON.parse(req.body.toString());
+        openaiKey = body.openaiKey;
+        language   = body.language || 'ko';
+        audioExt   = (body.audioExt || 'm4a').replace(/^\./, '');
+        if (body.audioBase64) {
+          const b64 = body.audioBase64.includes(',') ? body.audioBase64.split(',')[1] : body.audioBase64;
+          audioBuffer = Buffer.from(b64, 'base64');
+        }
+      }
+
+      if (!openaiKey) return res.status(400).json({ error: 'openaiKey required' });
+      if (!audioBuffer || !audioBuffer.length) return res.status(400).json({ error: 'audio data required' });
+
+      // Write to temp file
+      const tmpId = crypto.randomUUID();
+      const tmpAudio = path.join('/tmp', `transcribe-${tmpId}.${audioExt || 'm4a'}`);
+      fs.writeFileSync(tmpAudio, audioBuffer);
+      console.log(`[transcribe ${tmpId}] audio ${(audioBuffer.length/1024/1024).toFixed(1)}MB .${audioExt}`);
+
+      try {
+        // Call OpenAI Whisper API with verbose_json to get segments + timestamps
+        const FormData = (await import('node:stream')).Readable; // built-in
+        const form = new (await import('form-data').then(m => m.default || m))();
+        form.append('file', fs.createReadStream(tmpAudio), {
+          filename: `audio.${audioExt || 'm4a'}`,
+          contentType: audioExt === 'mp3' ? 'audio/mpeg'
+                     : audioExt === 'wav' ? 'audio/wav'
+                     : audioExt === 'mp4' ? 'audio/mp4'
+                     : 'audio/m4a',
+        });
+        form.append('model', 'whisper-1');
+        form.append('response_format', 'verbose_json');
+        form.append('timestamp_granularities[]', 'segment');
+        if (language) form.append('language', language);
+
+        const whisperRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openaiKey}`,
+            ...form.getHeaders(),
+          },
+          body: form,
+        });
+
+        const whisperJson = await whisperRes.json();
+        if (!whisperRes.ok) {
+          console.error(`[transcribe ${tmpId}] OpenAI error:`, whisperJson);
+          return res.status(502).json({ error: 'OpenAI Whisper error', detail: whisperJson });
+        }
+
+        const segments = (whisperJson.segments || []).map(s => ({
+          id: s.id,
+          start: s.start,
+          end: s.end,
+          text: s.text,
+        }));
+
+        const { ranges: offRecordRanges, triggeredSegments } = detectOffRecord(segments);
+
+        console.log(`[transcribe ${tmpId}] done — ${segments.length} segments, ${offRecordRanges.length} off-record range(s)`);
+        res.json({
+          ok: true,
+          text: whisperJson.text || '',
+          language: whisperJson.language || language,
+          duration: whisperJson.duration,
+          segments,
+          offRecord: {
+            ranges: offRecordRanges,
+            triggeredSegments,
+            summary: offRecordRanges.length === 0
+              ? '오프더레코드 구간이 감지되지 않았습니다.'
+              : `${offRecordRanges.length}개의 오프더레코드 구간이 감지되었습니다.`,
+          },
+        });
+      } finally {
+        try { fs.unlinkSync(tmpAudio); } catch {}
+      }
+    } catch (e) {
+      console.error('[transcribe] error:', e.message);
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
+
 // Static last so /compose and /health take precedence
 app.use(express.static(ROOT, {
   setHeaders: (res) => {
@@ -1186,5 +1436,6 @@ app.listen(PORT, () => {
   console.log(`compose server  http://localhost:${PORT}  (root: ${ROOT})`);
   console.log(`  GET  /<file>     static`);
   console.log(`  POST /compose    body { clipUrls:[], slots:[], bgmUrl? }`);
+  console.log(`  POST /transcribe body { audioBase64, openaiKey, language? }`);
   console.log(`  GET  /health`);
 });
